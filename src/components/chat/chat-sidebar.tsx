@@ -36,18 +36,32 @@ export function ChatSidebar({
   useEffect(() => {
     loadSessions()
     
-    // Set up realtime subscription
+    // Set up realtime subscription for chat sessions
     const channel = supabase
       .channel('chat-sessions')
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'INSERT',
           schema: 'public',
           table: 'chat_sessions',
           filter: `user_id=eq.${userId}`
         },
-        () => {
+        (payload) => {
+          console.log('📨 New session created:', payload.new)
+          loadSessions()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'chat_sessions',
+          filter: `user_id=eq.${userId}`
+        },
+        (payload) => {
+          console.log('🔄 Session updated:', payload.new)
           loadSessions()
         }
       )
@@ -151,7 +165,7 @@ export function ChatSidebar({
           className="w-full justify-start gap-2 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700 transition-all duration-200 rounded-xl shadow-sm hover:shadow"
         >
           <Plus className="h-4 w-4" />
-          <span className="font-medium">New Chat</span>
+          <span className="font-medium text-[14px]">New Chat</span>
         </Button>
       </div>
 
@@ -168,7 +182,7 @@ export function ChatSidebar({
         ) : (
           Object.entries(groupedSessions).map(([date, dateSessions]) => (
             <div key={date} className="mb-4">
-              <div className="text-xs text-gray-500 font-medium mb-2 px-2">
+              <div className="text-[12px] text-gray-500 font-medium mb-2 px-2">
                 {date}
               </div>
               {dateSessions.map(session => (
@@ -184,11 +198,11 @@ export function ChatSidebar({
                     <div className="flex items-start gap-2 flex-1 min-w-0">
                       <MessageSquare className="h-4 w-4 mt-0.5 text-gray-400 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
+                        <div className="text-[14px] font-medium truncate">
                           {session.title}
                         </div>
                         {session.bot_name && (
-                          <div className="text-xs text-gray-500 truncate">
+                          <div className="text-[12px] text-gray-500 truncate">
                             with {session.bot_name}
                           </div>
                         )}
@@ -210,10 +224,10 @@ export function ChatSidebar({
 
       {/* User Stats */}
       <div className="border-t border-gray-200 dark:border-gray-800 p-3">
-        <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+        <div className="text-[12px] text-gray-500 dark:text-gray-400 space-y-1">
           <div className="flex items-center gap-2">
             <Clock className="h-3 w-3" />
-            <span>{sessions.length} conversations</span>
+            <span className="text-[12px]">{sessions.length} conversations</span>
           </div>
         </div>
       </div>

@@ -24,6 +24,7 @@ interface SimpleChatProps {
   tenantId?: string
   sessionId?: string
   className?: string
+  onNewChat?: () => void
 }
 
 export function SimpleChat({ 
@@ -32,7 +33,8 @@ export function SimpleChat({
   userId = 'current-user',
   tenantId,
   sessionId: externalSessionId,
-  className = ''
+  className = '',
+  onNewChat
 }: SimpleChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -47,8 +49,18 @@ export function SimpleChat({
     sessionId: generatedSessionId, 
     isLoading: isSessionLoading, 
     error: sessionError, 
-    refresh: refreshSession 
+    refresh: refreshSession,
+    clearSession 
   } = useSessionId(botId, tenantId)
+  
+  // When explicitly no sessionId is provided and component is recreated, force new session
+  useEffect(() => {
+    if (externalSessionId === undefined) {
+      console.log('🔄 No external session, forcing new session creation')
+      clearSession()
+      refreshSession()
+    }
+  }, []) // Only on mount
   
   const sessionId = externalSessionId || generatedSessionId
 
@@ -127,11 +139,23 @@ export function SimpleChat({
             // Only add non-system messages
             if (newMessage.role !== 'system') {
               setMessages(prev => {
-                // Check if message already exists
-                const exists = prev.some(m => m.id === newMessage.id)
+                // Check if message already exists or if it's a user message we already have
+                const exists = prev.some(m => 
+                  m.id === newMessage.id || 
+                  (m.role === 'user' && m.content === newMessage.content && m.id.startsWith('temp-'))
+                )
+                
                 if (!exists) {
                   console.log('➕ Adding message:', newMessage.role, newMessage.id)
                   return [...prev, newMessage]
+                } else if (exists && prev.some(m => m.id.startsWith('temp-') && m.content === newMessage.content)) {
+                  // Replace temporary message with real one from database
+                  console.log('🔄 Replacing temp message with real one')
+                  return prev.map(m => 
+                    m.id.startsWith('temp-') && m.content === newMessage.content 
+                      ? newMessage 
+                      : m
+                  )
                 }
                 return prev
               })
@@ -195,6 +219,15 @@ export function SimpleChat({
     setInputValue('')
     setIsProcessing(true)
     
+    // Add user message immediately (optimistic update)
+    const userMessage: Message = {
+      id: `temp-${Date.now()}`,
+      content: messageText,
+      role: 'user',
+      timestamp: new Date(),
+    }
+    setMessages(prev => [...prev, userMessage])
+    
     try {
       // Send to backend first - it will handle inserting the user message
       const response = await fetch('/api/chat-simple', {
@@ -226,9 +259,15 @@ export function SimpleChat({
 
   const handleNewChat = async () => {
     console.log('🆕 Starting new chat')
-    setMessages([])
-    setIsProcessing(false)
-    await refreshSession()
+    if (onNewChat) {
+      // Use parent's new chat handler if provided
+      onNewChat()
+    } else {
+      // Fallback to local refresh
+      setMessages([])
+      setIsProcessing(false)
+      await refreshSession()
+    }
   }
 
   if (isSessionLoading || isLoadingHistory) {
@@ -251,13 +290,13 @@ export function SimpleChat({
   return (
     <div className={`flex flex-col h-full bg-white dark:bg-gray-950 ${className}`}>
       {/* Header */}
-      <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+      <div className="px-3 lg:px-4 py-2 lg:py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">{botName}</h2>
+          <h2 className="text-base lg:text-lg font-semibold">{botName}</h2>
           {isProcessing && (
-            <span className="text-sm text-gray-500 flex items-center gap-1">
+            <span className="text-xs lg:text-sm text-gray-500 flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Analizando...
+              <span className="hidden sm:inline">Analizando...</span>
             </span>
           )}
         </div>
@@ -266,23 +305,25 @@ export function SimpleChat({
           size="sm" 
           onClick={handleNewChat}
           disabled={isProcessing}
+          className="h-8 lg:h-9 px-2 lg:px-3 text-xs lg:text-sm"
         >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Nuevo Chat
+          <RefreshCw className="h-3 w-3 lg:h-4 lg:w-4 mr-1 lg:mr-2" />
+          <span className="hidden sm:inline">Nuevo Chat</span>
+          <span className="sm:hidden">Nuevo</span>
         </Button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 pb-2">
+      <div className="flex-1 overflow-y-auto px-3 lg:px-4 pb-2">
         <div className="max-w-3xl mx-auto">
           {messages.map((message, index) => (
-            <div key={message.id} className="mb-6">
+            <div key={message.id} className="mb-4 lg:mb-6">
               {message.role === 'user' ? (
                 // User message - aligned to right
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] text-right">
-                    <div className="inline-block text-left bg-gray-100 dark:bg-gray-800 rounded-2xl px-4 py-3">
-                      <p className="text-gray-900 dark:text-gray-100">
+                  <div className="max-w-[90%] lg:max-w-[85%] text-right">
+                    <div className="inline-block text-left bg-gray-100 dark:bg-gray-800 rounded-2xl px-3 lg:px-4 py-2 lg:py-3">
+                      <p className="text-[14px] lg:text-[16px] leading-relaxed text-gray-900 dark:text-gray-100">
                         {message.content}
                       </p>
                     </div>
@@ -293,27 +334,27 @@ export function SimpleChat({
                 <div className="w-full">
                   {/* Thinking time indicator */}
                   {message.latency && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    <div className="text-[10px] lg:text-xs text-gray-500 dark:text-gray-400 mb-1 lg:mb-2">
                       Thought for {(message.latency / 1000).toFixed(1)}s
                     </div>
                   )}
                   
                   {/* Assistant response */}
-                  <div className="prose prose-gray dark:prose-invert max-w-none">
+                  <div className="prose prose-sm lg:prose-base prose-gray dark:prose-invert max-w-none">
                     <ReactMarkdown 
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        p: ({ children }) => <p className="mb-3 text-gray-900 dark:text-gray-100">{children}</p>,
-                        ul: ({ children }) => <ul className="list-disc pl-6 mb-3 text-gray-900 dark:text-gray-100">{children}</ul>,
-                        ol: ({ children }) => <ol className="list-decimal pl-6 mb-3 text-gray-900 dark:text-gray-100">{children}</ol>,
-                        li: ({ children }) => <li className="mb-1">{children}</li>,
-                        h1: ({ children }) => <h1 className="text-2xl font-bold mb-3 mt-4 text-gray-900 dark:text-gray-100">{children}</h1>,
-                        h2: ({ children }) => <h2 className="text-xl font-bold mb-3 mt-4 text-gray-900 dark:text-gray-100">{children}</h2>,
-                        h3: ({ children }) => <h3 className="text-lg font-bold mb-2 mt-3 text-gray-900 dark:text-gray-100">{children}</h3>,
+                        p: ({ children }) => <p className="mb-2 lg:mb-3 text-[14px] lg:text-[16px] leading-relaxed text-gray-900 dark:text-gray-100">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc pl-4 lg:pl-6 mb-2 lg:mb-3 text-[14px] lg:text-[16px] leading-relaxed text-gray-900 dark:text-gray-100">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-4 lg:pl-6 mb-2 lg:mb-3 text-[14px] lg:text-[16px] leading-relaxed text-gray-900 dark:text-gray-100">{children}</ol>,
+                        li: ({ children }) => <li className="mb-0.5 lg:mb-1">{children}</li>,
+                        h1: ({ children }) => <h1 className="text-lg lg:text-2xl font-bold mb-2 lg:mb-3 mt-3 lg:mt-4 text-gray-900 dark:text-gray-100">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-base lg:text-xl font-bold mb-2 lg:mb-3 mt-3 lg:mt-4 text-gray-900 dark:text-gray-100">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-sm lg:text-lg font-bold mb-1 lg:mb-2 mt-2 lg:mt-3 text-gray-900 dark:text-gray-100">{children}</h3>,
                         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                        code: ({ children }) => <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm">{children}</code>,
-                        pre: ({ children }) => <pre className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto mb-3">{children}</pre>,
-                        blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-300 dark:border-gray-600 pl-4 italic my-3">{children}</blockquote>,
+                        code: ({ children }) => <code className="bg-gray-100 dark:bg-gray-800 px-1 lg:px-1.5 py-0.5 rounded text-[13px] lg:text-[14px] font-mono">{children}</code>,
+                        pre: ({ children }) => <pre className="bg-gray-100 dark:bg-gray-800 p-2 lg:p-4 rounded-lg overflow-x-auto mb-2 lg:mb-3 text-[13px] lg:text-[14px] font-mono">{children}</pre>,
+                        blockquote: ({ children }) => <blockquote className="border-l-2 lg:border-l-4 border-gray-300 dark:border-gray-600 pl-3 lg:pl-4 italic my-2 lg:my-3">{children}</blockquote>,
                       }}
                     >
                       {message.content}
@@ -326,13 +367,13 @@ export function SimpleChat({
         
         {/* Loading indicator */}
         {isProcessing && (
-          <div className="w-full mb-6">
-            <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+          <div className="w-full mb-4 lg:mb-6">
+            <div className="text-[10px] lg:text-xs text-gray-500 dark:text-gray-400 mb-1 lg:mb-2">
               Thinking...
             </div>
             <div className="flex items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-gray-600 dark:text-gray-400" />
-              <span className="text-gray-600 dark:text-gray-400">Analyzing your query...</span>
+              <Loader2 className="h-4 w-4 lg:h-5 lg:w-5 animate-spin text-gray-600 dark:text-gray-400" />
+              <span className="text-xs lg:text-sm text-gray-600 dark:text-gray-400">Analyzing your query...</span>
             </div>
           </div>
         )}
@@ -342,10 +383,10 @@ export function SimpleChat({
       </div>
 
       {/* Input Area with Disclaimer */}
-      <div className="relative px-4 pb-8 pt-4">
+      <div className="relative px-3 lg:px-4 pb-6 lg:pb-8 pt-3 lg:pt-4">
         <div className="max-w-4xl mx-auto">
           <form onSubmit={handleSubmit} className="relative">
-            <div className="relative bg-white dark:bg-gray-800 rounded-3xl shadow-xl border border-gray-200 dark:border-gray-700 transition-all hover:shadow-2xl">
+            <div className="relative bg-white dark:bg-gray-800 rounded-2xl lg:rounded-3xl shadow-lg lg:shadow-xl border border-gray-200 dark:border-gray-700 transition-all hover:shadow-xl lg:hover:shadow-2xl">
               <textarea
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
@@ -357,27 +398,27 @@ export function SimpleChat({
                 }}
                 placeholder={isProcessing ? "Waiting for response..." : "Ask anything"}
                 disabled={isProcessing || isSessionLoading}
-                className="w-full px-8 py-6 pr-16 text-lg bg-transparent border-0 rounded-3xl focus:ring-0 focus:outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none"
-                style={{ minHeight: '72px', maxHeight: '200px' }}
+                className="w-full px-4 lg:px-6 py-3 lg:py-4 pr-14 lg:pr-16 text-[14px] lg:text-[16px] leading-relaxed bg-transparent border-0 rounded-2xl lg:rounded-3xl focus:ring-0 focus:outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none"
+                style={{ minHeight: '56px', maxHeight: '200px' }}
                 rows={1}
               />
               <Button 
                 type="submit" 
                 disabled={isProcessing || isSessionLoading || !inputValue.trim()}
-                className="absolute right-4 top-1/2 -translate-y-1/2 rounded-2xl p-3 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:scale-105"
+                className="absolute right-2 lg:right-4 top-1/2 -translate-y-1/2 rounded-xl lg:rounded-2xl p-2 lg:p-3 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all hover:scale-105"
                 size="icon"
               >
                 {isProcessing ? (
-                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <Loader2 className="h-5 w-5 lg:h-6 lg:w-6 animate-spin" />
                 ) : (
-                  <Send className="h-6 w-6" />
+                  <Send className="h-5 w-5 lg:h-6 lg:w-6" />
                 )}
               </Button>
             </div>
           </form>
           
           {/* Disclaimer */}
-          <div className="text-center mt-4 text-xs text-gray-400 dark:text-gray-500 font-medium">
+          <div className="text-center mt-3 lg:mt-4 text-[10px] lg:text-xs text-gray-400 dark:text-gray-500 font-medium px-2">
             EarlyShiftAI puede cometer errores. Verificar información importante.
           </div>
         </div>

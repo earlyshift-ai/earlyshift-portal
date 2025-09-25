@@ -71,6 +71,51 @@ export async function POST(req: NextRequest) {
       console.error('❌ Failed to insert user message:', errorText)
     } else {
       console.log('✅ User message inserted')
+      
+      // First check if session needs title update
+      const sessionCheckResponse = await fetch(
+        `${supabaseUrl}/rest/v1/chat_sessions?id=eq.${actualSessionId}&select=title`,
+        {
+          method: 'GET',
+          headers: {
+            'apikey': serviceRoleKey,
+            'Authorization': `Bearer ${serviceRoleKey}`,
+            'Content-Type': 'application/json',
+          }
+        }
+      )
+      
+      let updateData: any = {
+        last_message_at: new Date().toISOString()
+      }
+      
+      if (sessionCheckResponse.ok) {
+        const sessions = await sessionCheckResponse.json()
+        const currentTitle = sessions[0]?.title
+        
+        // Only update title if it's empty or default
+        if (!currentTitle || currentTitle === 'New Chat' || currentTitle === '') {
+          updateData.title = text.slice(0, 100) // Use first 100 chars as title
+        }
+      }
+      
+      // Update session with last message time and potentially title
+      const updateSessionResponse = await fetch(
+        `${supabaseUrl}/rest/v1/chat_sessions?id=eq.${actualSessionId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'apikey': serviceRoleKey,
+            'Authorization': `Bearer ${serviceRoleKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updateData)
+        }
+      )
+      
+      if (updateSessionResponse.ok) {
+        console.log('✅ Session updated:', updateData)
+      }
     }
 
     // 2. Insert assistant placeholder
