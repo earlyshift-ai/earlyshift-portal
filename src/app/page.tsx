@@ -11,9 +11,9 @@ export default async function Home() {
   // Check if user is authenticated
   const { data: { user } } = await supabase.auth.getUser()
   
-  // If authenticated, redirect to company selection
+  // If authenticated, redirect to dashboard
   if (user) {
-    redirect('/select-company')
+    redirect('/dashboard')
   }
 
   // Landing page for unauthenticated users

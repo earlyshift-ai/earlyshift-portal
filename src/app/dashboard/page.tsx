@@ -17,15 +17,21 @@ export default async function DashboardPage() {
     .rpc('get_user_memberships', { user_uuid: user.id })
 
   if (membershipError || !memberships || memberships.length === 0) {
-    redirect('/select-company')
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+            No Company Access
+          </h1>
+          <p className="text-gray-600 dark:text-gray-400">
+            You don't have access to any companies yet. Please contact your administrator.
+          </p>
+        </div>
+      </div>
+    )
   }
 
-  // If multiple tenants, redirect to selection page (should be handled by middleware)
-  if (memberships.length > 1) {
-    redirect('/select-company')
-  }
-
-  // Use the single tenant
+  // Use the user's single tenant (users only have one company)
   const membership = memberships[0]
   
   // Get tenant details

@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "src/app/api/chat-simple/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/chat-async/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/chat-async-supabase/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

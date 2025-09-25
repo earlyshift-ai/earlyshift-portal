@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { TenantSelectorClient } from '@/components/tenant-selector-client'
 
 export default async function SelectCompanyPage() {
   const supabase = await createClient()
@@ -50,13 +49,6 @@ export default async function SelectCompanyPage() {
     )
   }
 
-  // Use client component to handle tenant selection and redirects
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <TenantSelectorClient 
-        memberships={memberships}
-        userEmail={user.email || 'User'}
-      />
-    </div>
-  )
+  // Since users only have one company, redirect directly to dashboard
+  redirect('/dashboard')
 }

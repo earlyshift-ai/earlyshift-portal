@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { waitUntil } from '@vercel/functions'
 
 /**
  * Simplified chat endpoint that avoids RLS issues
@@ -165,48 +166,46 @@ export async function POST(req: NextRequest) {
 
     console.log('✅ Simple ACK Response:', ackResponse)
 
-    // 4. Process in background with webhook
-    setTimeout(async () => {
-      try {
-        console.log('🔄 Background: Starting webhook call for', requestId)
-        
-        const webhookUrl = process.env.N8N_WEBHOOK_URL
-        const payload = {
-          message: text,
-          conversation_history: [],
-          conversation_id: actualSessionId,
-          session_id: actualSessionId,
-          bot_id: botId || 'default-bot-id',
-          bot_name: botName || 'Assistant',
-          user_id: userId || 'unknown',
-          request_id: requestId,
-          assistant_message_id: assistantMessageId,
-        }
-        
-        console.log('📤 Sending payload:', JSON.stringify(payload, null, 2))
-        
-        const webhookResponse = await fetch(webhookUrl!, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(300000), // 5 minutes timeout
-        })
+    // Return ACK immediately for fast UI response
+    const response = NextResponse.json(ackResponse, { status: 202 })
 
+    // 4. Trigger webhook in background using fetch without await (fire-and-forget)
+    // This ensures the ACK is returned immediately while webhook processes asynchronously
+    const webhookUrl = process.env.N8N_WEBHOOK_URL
+    if (webhookUrl) {
+      const payload = {
+        message: text,
+        conversation_history: [],
+        conversation_id: actualSessionId,
+        session_id: actualSessionId,
+        bot_id: botId || 'default-bot-id',
+        bot_name: botName || 'Assistant',
+        user_id: userId || 'unknown',
+        request_id: requestId,
+        assistant_message_id: assistantMessageId,
+      }
+      
+      console.log('🔄 Triggering webhook for', requestId)
+      console.log('📤 Payload:', JSON.stringify(payload, null, 2))
+      
+      // Use waitUntil to ensure webhook completes in Vercel
+      const webhookPromise = fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30000), // 30 seconds timeout
+      }).then(async (webhookResponse) => {
         if (webhookResponse.ok) {
           const result = await webhookResponse.json()
-          console.log('✅ Background: Webhook ACK received for', requestId)
-          console.log('📝 n8n will update Supabase directly, no backend update needed')
-          
-          // n8n handles the Supabase update, so we don't do anything here
-          
+          console.log('✅ Webhook completed for', requestId)
         } else {
-          console.error('❌ Background: Webhook failed for', requestId, webhookResponse.status)
+          console.error('❌ Webhook failed for', requestId, webhookResponse.status)
           
-          // Only update on error
+          // Update message with error status
           if (assistantMessageId !== 'error-placeholder') {
-            const updateResponse = await fetch(
+            await fetch(
               `${supabaseUrl}/rest/v1/messages?id=eq.${assistantMessageId}`,
               {
                 method: 'PATCH',
@@ -224,13 +223,42 @@ export async function POST(req: NextRequest) {
             )
           }
         }
-      } catch (error: any) {
-        console.error('❌ Background webhook error:', error)
-      }
-    }, 100)
+      }).catch(async (error) => {
+        console.error('❌ Webhook error for', requestId, error)
+        
+        // Update message with error status
+        if (assistantMessageId !== 'error-placeholder') {
+          try {
+            await fetch(
+              `${supabaseUrl}/rest/v1/messages?id=eq.${assistantMessageId}`,
+              {
+                method: 'PATCH',
+                headers: {
+                  'apikey': serviceRoleKey,
+                  'Authorization': `Bearer ${serviceRoleKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  content: `Error: ${error.message}`,
+                  status: 'failed',
+                  error_text: error.message,
+                })
+              }
+            )
+          } catch (updateError) {
+            console.error('Failed to update message with error:', updateError)
+          }
+        }
+      })
+      
+      // Use waitUntil to keep the function running after response
+      // This ensures the webhook completes even after we return the ACK
+      waitUntil(webhookPromise)
+    } else {
+      console.error('❌ N8N_WEBHOOK_URL not configured')
+    }
 
-    // Return ACK immediately
-    return NextResponse.json(ackResponse, { status: 202 })
+    return response
 
   } catch (error: any) {
     console.error('Simple chat API error:', error)
