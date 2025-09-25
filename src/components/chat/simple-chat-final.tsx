@@ -22,13 +22,17 @@ interface SimpleChatProps {
   botId?: string
   userId?: string
   tenantId?: string
+  sessionId?: string
+  className?: string
 }
 
 export function SimpleChat({ 
   botName, 
   botId,
   userId = 'current-user',
-  tenantId
+  tenantId,
+  sessionId: externalSessionId,
+  className = ''
 }: SimpleChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -38,13 +42,15 @@ export function SimpleChat({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<any>(null)
   
-  // Session management
+  // Session management - use external sessionId if provided
   const { 
-    sessionId, 
+    sessionId: generatedSessionId, 
     isLoading: isSessionLoading, 
     error: sessionError, 
     refresh: refreshSession 
   } = useSessionId(botId, tenantId)
+  
+  const sessionId = externalSessionId || generatedSessionId
 
   const supabase = createClient()
 
@@ -243,7 +249,7 @@ export function SimpleChat({
   }
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-lg shadow-md">
+    <div className={`flex flex-col h-full bg-white dark:bg-gray-800 ${className}`}>
       {/* Header */}
       <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
