@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Search, BookOpen, MoreHorizontal } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
@@ -45,6 +45,12 @@ export function ChatSidebar({
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
   const loadingRef = useRef(false)
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchTimeoutRef = useRef<NodeJS.Timeout>()
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
 
   useEffect(() => {
@@ -194,6 +200,62 @@ export function ChatSidebar({
   
   const groupedSessions = groupSessionsByDate(displaySessions)
 
+  // Handle search with debouncing
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query)
+    
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+    
+    // Clear results if query is empty
+    if (!query.trim()) {
+      setSearchResults([])
+      return
+    }
+    
+    // Debounce search by 300ms
+    searchTimeoutRef.current = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const response = await fetch(
+          `/api/search-sessions?q=${encodeURIComponent(query)}&limit=20`
+        )
+        
+        if (response.ok) {
+          const data = await response.json()
+          setSearchResults(data.results)
+        }
+      } catch (error) {
+        console.error('Search error:', error)
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+  }
+
+  // Clear search
+  const clearSearch = () => {
+    setIsSearching(false)
+    setSearchQuery('')
+    setSearchResults([])
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+  }
+
+  // Highlight matching text
+  const highlightMatch = (text: string, query: string) => {
+    if (!query) return text
+    const parts = text.split(new RegExp(`(${query})`, 'gi'))
+    return parts.map((part, i) => 
+      part.toLowerCase() === query.toLowerCase() 
+        ? <mark key={i} className="bg-yellow-500/30 text-white">{part}</mark>
+        : part
+    )
+  }
+
   return (
     <div className="flex flex-col h-full bg-[#171717] text-white overflow-hidden">
       {/* Company Logo and Name */}
@@ -226,32 +288,123 @@ export function ChatSidebar({
           <span>New chat</span>
         </button>
         
-        <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-gray-800 rounded-lg transition-colors text-left opacity-60">
+        <button 
+          onClick={() => {
+            setIsSearching(true)
+            setTimeout(() => searchInputRef.current?.focus(), 100)
+          }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-gray-800 rounded-lg transition-colors text-left"
+        >
           <Search className="h-5 w-5" strokeWidth={1.5} />
           <span>Search chats</span>
-        </button>
-        
-        <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-gray-800 rounded-lg transition-colors text-left opacity-60">
-          <BookOpen className="h-5 w-5" strokeWidth={1.5} />
-          <span>Library</span>
         </button>
       </div>
       
       <div className="border-t border-gray-800 my-3 mx-3"></div>
 
+      {/* Search Input */}
+      {isSearching && (
+        <div className="px-3 mb-3">
+          <div className="relative">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  clearSearch()
+                }
+              }}
+              placeholder="Search in chats..."
+              className="w-full bg-gray-800 text-white placeholder-gray-500 rounded-lg px-3 py-2 pr-8 text-[14px] focus:outline-none focus:ring-1 focus:ring-gray-600"
+            />
+            {searchQuery && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Chat History */}
       <div className="flex-1 overflow-y-auto px-3">
-        <div className="text-[12px] text-gray-500 font-medium mb-2">Chats</div>
-        {loading ? (
-          <div className="text-gray-400 text-sm text-center py-4">
-            Loading chats...
-          </div>
-        ) : sessions.length === 0 ? (
-          <div className="text-gray-400 text-sm text-center py-4">
-            No chats yet. Start a new conversation!
-          </div>
+        <div className="text-[12px] text-gray-500 font-medium mb-2">
+          {isSearching && searchQuery ? 'Search Results' : 'Chats'}
+        </div>
+        {/* Search Results */}
+        {isSearching && searchQuery ? (
+          searchLoading ? (
+            <div className="text-gray-400 text-sm text-center py-4">
+              Searching...
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className="text-gray-400 text-sm text-center py-4">
+              No results found for "{searchQuery}"
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {searchResults.map((result: any) => (
+                <div
+                  key={`${result.id}-${result.matchType}`}
+                  onClick={() => {
+                    onSelectSession(result.id)
+                    clearSearch()
+                  }}
+                  className={cn(
+                    "w-full text-left rounded-lg px-3 py-2.5 group hover:bg-gray-800 transition-all duration-150 cursor-pointer",
+                    currentSessionId === result.id ? "bg-gray-800" : ""
+                  )}
+                >
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] truncate">
+                          {result.matchType === 'title' 
+                            ? highlightMatch(result.title, searchQuery)
+                            : result.title}
+                        </div>
+                        {result.botName && (
+                          <div className="text-[11px] text-gray-500 truncate">
+                            {result.botName}
+                          </div>
+                        )}
+                      </div>
+                      <span className={cn(
+                        "text-[10px] px-2 py-0.5 rounded",
+                        result.matchType === 'title' 
+                          ? "bg-blue-500/20 text-blue-400" 
+                          : "bg-green-500/20 text-green-400"
+                      )}>
+                        {result.matchType}
+                      </span>
+                    </div>
+                    {result.matchType === 'message' && (
+                      <div className="text-[12px] text-gray-400 truncate">
+                        "{highlightMatch(result.matchedContent, searchQuery)}"
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         ) : (
-          Object.entries(groupedSessions).map(([date, dateSessions]) => (
+          /* Normal Chat List */
+          loading ? (
+            <div className="text-gray-400 text-sm text-center py-4">
+              Loading chats...
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="text-gray-400 text-sm text-center py-4">
+              No chats yet. Start a new conversation!
+            </div>
+          ) : (
+            Object.entries(groupedSessions).map(([date, dateSessions]) => (
             <div key={date} className="mb-4">
               {dateSessions.map(session => (
                 <div
@@ -284,7 +437,7 @@ export function ChatSidebar({
               ))}
             </div>
           ))
-        )}
+        ))}
       </div>
 
       {/* User Profile */}
