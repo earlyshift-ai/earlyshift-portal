@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { ChatSidebar } from './chat-sidebar'
 import { SimpleChat } from './simple-chat-final'
 import { TenantLogo } from '@/components/tenant-logo'
@@ -30,18 +30,51 @@ interface ChatLayoutProps {
   initialBots?: Bot[]
 }
 
+interface NewChatSession {
+  id: string
+  title: string
+  botName?: string
+}
+
 export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) {
   const [selectedBot, setSelectedBot] = useState<Bot | null>(initialBots[0] || null)
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>()
   const [availableBots, setAvailableBots] = useState<Bot[]>(initialBots)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [key, setKey] = useState(0) // Key to force re-render chat component
+  const [sidebarOpen, setSidebarOpen] = useState(false) // Default to closed on mobile, open on desktop
+  const [mounted, setMounted] = useState(false)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [hasInitialSession, setHasInitialSession] = useState(false)
+  const sessionCreationRef = useRef<Promise<void> | null>(null)
+  const [newLocalSession, setNewLocalSession] = useState<NewChatSession | null>(null)
+  
+  // Set sidebar open by default on desktop
+  useEffect(() => {
+    setMounted(true)
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) { // lg breakpoint
+        setSidebarOpen(true)
+      }
+    }
+    handleResize() // Set initial state
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   
   const supabase = createClient()
 
   useEffect(() => {
     loadBots()
   }, [tenant.id])
+  
+  // Create initial session when component mounts if no session exists
+  // Only run once at the very beginning
+  useEffect(() => {
+    if (selectedBot && !currentSessionId && mounted && !hasInitialSession) {
+      console.log('Creating initial session for bot:', selectedBot.id)
+      setHasInitialSession(true)
+      handleNewChat()
+    }
+  }, []) // Empty dependency array - only run once on mount
 
   const loadBots = async () => {
     try {
@@ -70,74 +103,135 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
     }
   }
 
-  const handleNewChat = () => {
-    setCurrentSessionId(undefined)
-    setKey(prev => prev + 1) // Force re-render to create new session
+  const handleNewChat = async () => {
+    if (!selectedBot) return
+    
+    // Prevent concurrent session creation
+    if (sessionCreationRef.current) {
+      console.log('⏳ Session creation already in progress, waiting...')
+      await sessionCreationRef.current
+      return
+    }
+    
+    if (isCreatingSession) {
+      console.log('🚫 Already creating session, skipping duplicate call')
+      return
+    }
+    
+    // Create a new session immediately
+    const createSession = async () => {
+      try {
+        setIsCreatingSession(true)
+        
+        const response = await fetch('/api/session', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            botId: selectedBot.id,
+            tenantId: tenant.id,
+            userId: user.id,
+          }),
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const newSessionId = data.sessionId
+          
+          console.log('✅ New session created:', newSessionId)
+          
+          // Set the new session ID - this will be passed to SimpleChat
+          setCurrentSessionId(newSessionId)
+          
+          // Clear localStorage to prevent reusing old sessions
+          const sessionKey = `sessionId:${selectedBot.id}`
+          localStorage.removeItem(sessionKey)
+        }
+      } catch (error) {
+        console.error('Failed to create new session:', error)
+      } finally {
+        setIsCreatingSession(false)
+        sessionCreationRef.current = null
+      }
+    }
+    
+    sessionCreationRef.current = createSession()
+    await sessionCreationRef.current
   }
 
   const handleSelectSession = (sessionId: string) => {
     setCurrentSessionId(sessionId)
-    setKey(prev => prev + 1) // Force re-render with new session
+    // Clear local session when selecting a different session
+    if (newLocalSession?.id !== sessionId) {
+      setNewLocalSession(null)
+    }
+  }
+  
+  const handleFirstMessage = (sessionId: string, messageText: string) => {
+    // When first message is sent, update local state immediately
+    console.log('📝 First message sent, updating sidebar:', sessionId, messageText)
+    setNewLocalSession({
+      id: sessionId,
+      title: messageText.slice(0, 100),
+      botName: selectedBot?.name
+    })
   }
 
-  const handleBotChange = (bot: Bot) => {
+  const handleBotChange = async (bot: Bot) => {
+    // Clear current session first
+    setCurrentSessionId(undefined)
     setSelectedBot(bot)
-    handleNewChat() // Start new chat when changing bot
+    
+    // Wait a tick to ensure state is updated
+    setTimeout(() => {
+      handleNewChat() // Start new chat when changing bot
+    }, 0)
   }
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-gray-50 to-white dark:from-gray-950 dark:to-gray-900 relative">
+    <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-gray-50 to-white dark:from-gray-950 dark:to-gray-900">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Left Sidebar - Chat History */}
-      <div className={cn(
-        "fixed lg:relative inset-y-0 left-0 z-50 w-[260px] lg:w-[260px] border-r border-gray-200 dark:border-gray-800 flex flex-col bg-white dark:bg-gray-900 lg:bg-white/50 lg:dark:bg-gray-900/50 backdrop-blur-sm transition-transform duration-300 lg:translate-x-0",
+      {/* Left Sidebar - Chat History - Always fixed position */}
+      <aside className={cn(
+        "fixed top-0 left-0 z-40 w-[320px] h-full bg-[#171717] transition-transform duration-300 ease-in-out",
         sidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}>
-        {/* Mobile Close Button */}
-        <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-800 lg:hidden">
-          <TenantLogo size="sm" showName={true} />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden"
-          >
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
-        
-        {/* Desktop Logo */}
-        <div className="hidden lg:block p-3 border-b border-gray-200 dark:border-gray-800">
-          <TenantLogo size="sm" showName={true} />
-        </div>
-        
-        {/* Chat History */}
-        <div className="flex-1">
+        {/* Chat History - Full height */}
+        <div className="h-full overflow-hidden flex flex-col">
           <ChatSidebar
             tenantId={tenant.id}
             userId={user.id}
+            userEmail={user.email}
+            tenantName={tenant.name}
+            tenantLogo={tenant.logo_url}
             currentSessionId={currentSessionId}
+            currentBotName={selectedBot?.name}
+            newLocalSession={newLocalSession}
             onNewChat={() => {
               handleNewChat()
+              setNewLocalSession(null) // Clear local session on new chat
               setSidebarOpen(false) // Close sidebar on mobile after action
             }}
             onSelectSession={(id) => {
               handleSelectSession(id)
-              setSidebarOpen(false) // Close sidebar on mobile after action
             }}
           />
         </div>
-      </div>
+      </aside>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      {/* Main Chat Area - Takes full screen */}
+      <main className={cn(
+        "w-full h-full flex flex-col transition-all duration-300",
+        sidebarOpen ? "lg:pl-[320px]" : "pl-0"
+      )}>
         {/* Top Bar */}
         <div className="border-b border-gray-200 dark:border-gray-800 px-2 lg:px-4 py-2 lg:py-3 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
           <div className="flex items-center justify-between">
@@ -147,21 +241,22 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
                 variant="ghost"
                 size="sm"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-1.5 lg:p-2 lg:hidden"
+                className="p-1.5 lg:p-2"
               >
                 <Menu className="h-5 w-5" />
               </Button>
               
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10">
-                    <Bot className="h-4 w-4" />
-                    <span className="font-medium text-sm lg:text-base truncate max-w-[120px] lg:max-w-none">
-                      {selectedBot?.name || 'Select a bot'}
-                    </span>
-                    <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
+              {mounted ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10">
+                      <Bot className="h-4 w-4" />
+                      <span className="font-medium text-sm lg:text-base truncate max-w-[120px] lg:max-w-none">
+                        {selectedBot?.name || 'Select a bot'}
+                      </span>
+                      <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-64">
                   <DropdownMenuLabel>Available Bots</DropdownMenuLabel>
                   <DropdownMenuSeparator />
@@ -190,7 +285,15 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
                     </div>
                   )}
                 </DropdownMenuContent>
-              </DropdownMenu>
+                </DropdownMenu>
+              ) : (
+                <Button variant="ghost" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10" disabled>
+                  <Bot className="h-4 w-4" />
+                  <span className="font-medium text-sm lg:text-base truncate max-w-[120px] lg:max-w-none">
+                    Loading...
+                  </span>
+                </Button>
+              )}
 
               {selectedBot?.description && (
                 <span className="text-sm text-gray-500 hidden xl:block">
@@ -200,14 +303,15 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
             </div>
 
             {/* User Menu - Desktop only full menu, mobile simplified */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10">
-                  <User className="h-4 w-4" />
-                  <span className="text-sm hidden sm:inline truncate max-w-[150px]">{user.email}</span>
-                  <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4 hidden sm:inline" />
-                </Button>
-              </DropdownMenuTrigger>
+            {mounted ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10">
+                    <User className="h-4 w-4" />
+                    <span className="text-sm hidden sm:inline truncate max-w-[150px]">{user.email}</span>
+                    <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4 hidden sm:inline" />
+                  </Button>
+                </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel className="sm:hidden">
                   <div className="text-xs truncate">{user.email}</div>
@@ -223,7 +327,12 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
                   Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
+              </DropdownMenu>
+            ) : (
+              <Button variant="ghost" size="sm" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10" disabled>
+                <User className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -231,7 +340,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
         <div className="flex-1 overflow-hidden">
           {selectedBot ? (
             <SimpleChat
-              key={key}
+              key={`${selectedBot.id}-${currentSessionId || 'new'}`}
               botName={selectedBot.name}
               botId={selectedBot.id}
               userId={user.id}
@@ -239,6 +348,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
               sessionId={currentSessionId}
               className="h-full"
               onNewChat={handleNewChat}
+              onFirstMessage={handleFirstMessage}
             />
           ) : (
             <div className="flex items-center justify-center h-full">
@@ -250,7 +360,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
             </div>
           )}
         </div>
-      </div>
+      </main>
     </div>
   )
 }

@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Plus, MessageSquare, Clock, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Search, BookOpen, MoreHorizontal } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 
@@ -17,20 +16,35 @@ interface ChatSession {
 interface ChatSidebarProps {
   tenantId: string
   userId: string
+  userEmail?: string
+  tenantName?: string
+  tenantLogo?: string
   currentSessionId?: string
+  currentBotName?: string
+  newLocalSession?: {
+    id: string
+    title: string
+    botName?: string
+  } | null
   onNewChat: () => void
   onSelectSession: (sessionId: string) => void
 }
 
 export function ChatSidebar({ 
   tenantId, 
-  userId, 
+  userId,
+  userEmail,
+  tenantName,
+  tenantLogo,
   currentSessionId,
+  currentBotName,
+  newLocalSession,
   onNewChat,
   onSelectSession 
 }: ChatSidebarProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+  const loadingRef = useRef(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -49,6 +63,7 @@ export function ChatSidebar({
         },
         (payload) => {
           console.log('📨 New session created:', payload.new)
+          // Reload sessions to get the correct bot name and avoid duplicates
           loadSessions()
         }
       )
@@ -62,6 +77,7 @@ export function ChatSidebar({
         },
         (payload) => {
           console.log('🔄 Session updated:', payload.new)
+          // Reload sessions to ensure consistency
           loadSessions()
         }
       )
@@ -70,9 +86,16 @@ export function ChatSidebar({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [userId, tenantId])
+  }, [userId, tenantId, currentBotName])
+
+  // Remove this effect - let realtime subscriptions handle session updates
+  // This was causing duplicate sessions
 
   const loadSessions = async () => {
+    // Prevent concurrent loads
+    if (loadingRef.current) return
+    loadingRef.current = true
+    
     try {
       const { data, error } = await supabase
         .from('chat_sessions')
@@ -104,6 +127,7 @@ export function ChatSidebar({
       console.error('Error loading sessions:', error)
     } finally {
       setLoading(false)
+      loadingRef.current = false
     }
   }
 
@@ -154,23 +178,70 @@ export function ChatSidebar({
     return groups
   }
 
-  const groupedSessions = groupSessionsByDate(sessions)
+  // Combine database sessions with local session
+  const displaySessions = [...sessions]
+  
+  // Add local session if it exists and isn't already in the list
+  if (newLocalSession && !sessions.some(s => s.id === newLocalSession.id)) {
+    displaySessions.unshift({
+      id: newLocalSession.id,
+      title: newLocalSession.title || 'New Chat',
+      created_at: new Date().toISOString(),
+      last_message_at: new Date().toISOString(),
+      bot_name: newLocalSession.botName
+    })
+  }
+  
+  const groupedSessions = groupSessionsByDate(displaySessions)
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
-      {/* New Chat Button */}
-      <div className="p-3">
-        <Button
-          onClick={onNewChat}
-          className="w-full justify-start gap-2 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700 transition-all duration-200 rounded-xl shadow-sm hover:shadow"
-        >
-          <Plus className="h-4 w-4" />
-          <span className="font-medium text-[14px]">New Chat</span>
-        </Button>
+    <div className="flex flex-col h-full bg-[#171717] text-white overflow-hidden">
+      {/* Company Logo and Name */}
+      <div className="flex-shrink-0 p-4 flex items-center gap-3">
+        {tenantLogo ? (
+          <img 
+            src={tenantLogo} 
+            alt={tenantName || 'Company'} 
+            className="w-8 h-8 rounded-lg object-contain bg-white p-0.5"
+          />
+        ) : (
+          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+            <svg className="w-5 h-5 text-black" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
+            </svg>
+          </div>
+        )}
+        {tenantName && (
+          <span className="text-[14px] font-medium truncate">{tenantName}</span>
+        )}
       </div>
 
+      {/* Action Buttons */}
+      <div className="flex-shrink-0 space-y-1 px-3">
+        <button
+          onClick={onNewChat}
+          className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-gray-800 rounded-lg transition-colors text-left"
+        >
+          <Plus className="h-5 w-5" strokeWidth={1.5} />
+          <span>New chat</span>
+        </button>
+        
+        <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-gray-800 rounded-lg transition-colors text-left opacity-60">
+          <Search className="h-5 w-5" strokeWidth={1.5} />
+          <span>Search chats</span>
+        </button>
+        
+        <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-gray-800 rounded-lg transition-colors text-left opacity-60">
+          <BookOpen className="h-5 w-5" strokeWidth={1.5} />
+          <span>Library</span>
+        </button>
+      </div>
+      
+      <div className="border-t border-gray-800 my-3 mx-3"></div>
+
       {/* Chat History */}
-      <div className="flex-1 overflow-y-auto px-3 py-2">
+      <div className="flex-1 overflow-y-auto px-3">
+        <div className="text-[12px] text-gray-500 font-medium mb-2">Chats</div>
         {loading ? (
           <div className="text-gray-400 text-sm text-center py-4">
             Loading chats...
@@ -182,37 +253,31 @@ export function ChatSidebar({
         ) : (
           Object.entries(groupedSessions).map(([date, dateSessions]) => (
             <div key={date} className="mb-4">
-              <div className="text-[12px] text-gray-500 font-medium mb-2 px-2">
-                {date}
-              </div>
               {dateSessions.map(session => (
                 <div
                   key={session.id}
                   onClick={() => onSelectSession(session.id)}
                   className={cn(
-                    "w-full text-left rounded-lg px-3 py-2 mb-1 group hover:bg-white dark:hover:bg-gray-800 transition-all duration-150 cursor-pointer",
-                    currentSessionId === session.id ? "bg-white dark:bg-gray-800 shadow-sm" : "hover:shadow-sm"
+                    "w-full text-left rounded-lg px-3 py-2.5 mb-0.5 group hover:bg-gray-800 transition-all duration-150 cursor-pointer text-[14px]",
+                    currentSessionId === session.id ? "bg-gray-800" : ""
                   )}
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-2 flex-1 min-w-0">
-                      <MessageSquare className="h-4 w-4 mt-0.5 text-gray-400 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[14px] font-medium truncate">
-                          {session.title}
-                        </div>
-                        {session.bot_name && (
-                          <div className="text-[12px] text-gray-500 truncate">
-                            with {session.bot_name}
-                          </div>
-                        )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate">
+                        {session.title}
                       </div>
+                      {session.bot_name && (
+                        <div className="text-[11px] text-gray-500 truncate mt-0.5">
+                          {session.bot_name}
+                        </div>
+                      )}
                     </div>
                     <button
                       onClick={(e) => deleteSession(session.id, e)}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-opacity"
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-opacity ml-2 flex-shrink-0"
                     >
-                      <Trash2 className="h-3 w-3 text-gray-400" />
+                      <MoreHorizontal className="h-4 w-4 text-gray-400" />
                     </button>
                   </div>
                 </div>
@@ -222,14 +287,14 @@ export function ChatSidebar({
         )}
       </div>
 
-      {/* User Stats */}
-      <div className="border-t border-gray-200 dark:border-gray-800 p-3">
-        <div className="text-[12px] text-gray-500 dark:text-gray-400 space-y-1">
-          <div className="flex items-center gap-2">
-            <Clock className="h-3 w-3" />
-            <span className="text-[12px]">{sessions.length} conversations</span>
+      {/* User Profile */}
+      <div className="flex-shrink-0 border-t border-gray-800 p-3">
+        <button className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 rounded-lg transition-colors">
+          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
+            {userEmail ? userEmail.charAt(0).toUpperCase() : 'U'}
           </div>
-        </div>
+          <span className="text-[14px] truncate flex-1 text-left">{userEmail || 'User'}</span>
+        </button>
       </div>
     </div>
   )

@@ -77,26 +77,44 @@ export async function POST(req: NextRequest) {
 
       sessionData = data
     } else {
-      // Create new session
-      const { data, error } = await supabase
+      // Check for recent duplicate sessions first
+      const oneMinuteAgo = new Date(Date.now() - 60000).toISOString()
+      const { data: recentSessions } = await supabase
         .from('chat_sessions')
-        .insert({
-          tenant_id: actualTenantId,
-          user_id: currentUserId,
-          bot_id: botId,
-        })
-        .select('id')
-        .single()
+        .select('id, created_at')
+        .eq('tenant_id', actualTenantId)
+        .eq('user_id', currentUserId)
+        .eq('bot_id', botId)
+        .eq('status', 'active')
+        .gte('created_at', oneMinuteAgo)
+        .order('created_at', { ascending: false })
+        .limit(1)
 
-      if (error) {
-        console.error('Session creation error:', error)
-        return NextResponse.json(
-          { error: 'Failed to create session', details: error.message },
-          { status: 500 }
-        )
+      if (recentSessions && recentSessions.length > 0) {
+        console.log('⚠️ Found recent session created less than 1 minute ago, reusing:', recentSessions[0].id)
+        sessionData = recentSessions[0]
+      } else {
+        // Create new session
+        const { data, error } = await supabase
+          .from('chat_sessions')
+          .insert({
+            tenant_id: actualTenantId,
+            user_id: currentUserId,
+            bot_id: botId,
+          })
+          .select('id')
+          .single()
+
+        if (error) {
+          console.error('Session creation error:', error)
+          return NextResponse.json(
+            { error: 'Failed to create session', details: error.message },
+            { status: 500 }
+          )
+        }
+
+        sessionData = data
       }
-
-      sessionData = data
     }
 
     console.log('✅ Session created/updated:', sessionData.id)

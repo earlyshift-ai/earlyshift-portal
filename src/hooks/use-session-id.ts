@@ -17,6 +17,10 @@ export function useSessionId(botId?: string, tenantId?: string): UseSessionIdRet
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // If botId is not provided, return early with null values
+  // This happens when we have an external session
+  const skipHook = !botId
+  
   const sessionKey = botId ? `sessionId:${botId}` : 'sessionId:default'
 
   const createNewSession = useCallback(async (): Promise<string> => {
@@ -122,8 +126,23 @@ export function useSessionId(botId?: string, tenantId?: string): UseSessionIdRet
 
   // Initialize session on mount
   useEffect(() => {
+    if (skipHook) {
+      setIsLoading(false)
+      return
+    }
     loadOrCreateSession()
-  }, [loadOrCreateSession])
+  }, [loadOrCreateSession, skipHook])
+
+  // Return early if hook is skipped
+  if (skipHook) {
+    return {
+      sessionId: null,
+      isLoading: false,
+      error: null,
+      refresh: async () => {},
+      clearSession: () => {},
+    }
+  }
 
   return {
     sessionId,

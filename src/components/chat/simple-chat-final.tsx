@@ -25,6 +25,7 @@ interface SimpleChatProps {
   sessionId?: string
   className?: string
   onNewChat?: () => void
+  onFirstMessage?: (sessionId: string, messageText: string) => void
 }
 
 export function SimpleChat({ 
@@ -34,33 +35,27 @@ export function SimpleChat({
   tenantId,
   sessionId: externalSessionId,
   className = '',
-  onNewChat
+  onNewChat,
+  onFirstMessage
 }: SimpleChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [hasUserMessage, setHasUserMessage] = useState(false)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<any>(null)
   
   // Session management - use external sessionId if provided
+  // Only use the hook if no external session is provided
   const { 
     sessionId: generatedSessionId, 
     isLoading: isSessionLoading, 
     error: sessionError, 
     refresh: refreshSession,
     clearSession 
-  } = useSessionId(botId, tenantId)
-  
-  // When explicitly no sessionId is provided and component is recreated, force new session
-  useEffect(() => {
-    if (externalSessionId === undefined) {
-      console.log('🔄 No external session, forcing new session creation')
-      clearSession()
-      refreshSession()
-    }
-  }, []) // Only on mount
+  } = useSessionId(externalSessionId ? undefined : botId, externalSessionId ? undefined : tenantId)
   
   const sessionId = externalSessionId || generatedSessionId
 
@@ -73,10 +68,18 @@ export function SimpleChat({
 
   // Load messages and setup Realtime subscription
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId) {
+      // Clear messages when no session
+      setMessages([])
+      return
+    }
 
     const setupChat = async () => {
       console.log('🔧 Setting up chat for session:', sessionId)
+      
+      // Clear previous messages and reset state
+      setMessages([])
+      setHasUserMessage(false)
       
       // Load existing messages
       try {
@@ -101,6 +104,8 @@ export function SimpleChat({
           }))
 
         setMessages(formattedMessages)
+        // Check if there are user messages
+        setHasUserMessage(formattedMessages.some(m => m.role === 'user'))
       } catch (error) {
         console.error('Failed to load messages:', error)
       } finally {
@@ -219,6 +224,13 @@ export function SimpleChat({
     setInputValue('')
     setIsProcessing(true)
     
+    // If this is the first user message, notify parent to update sidebar
+    if (!hasUserMessage && onFirstMessage) {
+      console.log('📝 First message in session, notifying parent')
+      onFirstMessage(sessionId, messageText)
+      setHasUserMessage(true)
+    }
+    
     // Add user message immediately (optimistic update)
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
@@ -259,6 +271,7 @@ export function SimpleChat({
 
   const handleNewChat = async () => {
     console.log('🆕 Starting new chat')
+    setHasUserMessage(false) // Reset for new chat
     if (onNewChat) {
       // Use parent's new chat handler if provided
       onNewChat()
@@ -270,7 +283,9 @@ export function SimpleChat({
     }
   }
 
-  if (isSessionLoading || isLoadingHistory) {
+  // Only show loading if we're actually loading a session
+  // Skip if we have an external session
+  if (!externalSessionId && (isSessionLoading || isLoadingHistory)) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500">
         <Loader2 className="h-6 w-6 animate-spin mr-2" />
@@ -288,7 +303,7 @@ export function SimpleChat({
   }
 
   return (
-    <div className={`flex flex-col h-full bg-white dark:bg-gray-950 ${className}`}>
+    <div className={`flex flex-col h-full w-full bg-white dark:bg-gray-950 ${className}`}>
       {/* Header */}
       <div className="px-3 lg:px-4 py-2 lg:py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
