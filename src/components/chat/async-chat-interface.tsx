@@ -91,7 +91,7 @@ export function AsyncChatInterface({
         role: 'assistant',
         timestamp: new Date(),
         requestId,
-        latency,
+        latency: latency ?? undefined,
         status: 'completed',
       }
       

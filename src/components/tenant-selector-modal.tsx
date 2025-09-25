@@ -119,7 +119,7 @@ interface TenantCardProps {
   isSelected: boolean
   isRedirecting: boolean
   onSelect: () => void
-  getRoleIcon: (role: string) => JSX.Element
+  getRoleIcon: (role: string) => React.ReactElement
   getRoleBadgeColor: (role: string) => string
 }
 

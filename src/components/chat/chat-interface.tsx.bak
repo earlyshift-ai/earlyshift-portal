@@ -36,18 +36,17 @@ export function ChatInterface() {
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null)
   const [availableBots, setAvailableBots] = useState<Bot[]>([])
   const [isLoadingBots, setIsLoadingBots] = useState(true)
+  const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
   // Initialize chat with AI SDK
+  const [isLoading, setIsLoading] = useState(false)
   const {
     messages,
-    input,
-    handleInputChange,
-    handleSubmit,
-    isLoading,
     error,
-    setMessages
+    setMessages,
+    append
   } = useChat({
     api: '/api/chat',
     body: {
@@ -189,7 +188,7 @@ export function ChatInterface() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!selectedBot || !input.trim()) return
+    if (!selectedBot || !input.trim() || isLoading) return
 
     // Create session if none exists
     if (!currentSession) {
@@ -201,11 +200,22 @@ export function ChatInterface() {
       }
     }
 
-    // Save user message to database
-    await saveMessageToDatabase(input, 'user')
+    const userMessage = input.trim()
+    setInput('') // Clear input
+    setIsLoading(true)
 
-    // Submit to AI SDK
-    handleSubmit(e)
+    try {
+      // Save user message to database
+      await saveMessageToDatabase(userMessage, 'user')
+
+      // Submit to AI SDK using append
+      await append({
+        role: 'user',
+        content: userMessage
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   if (!tenant) {
@@ -287,7 +297,7 @@ export function ChatInterface() {
               <form onSubmit={onSubmit} className="flex gap-2">
                 <Input
                   value={input}
-                  onChange={handleInputChange}
+                  onChange={(e) => setInput(e.target.value)}
                   placeholder={`Message ${selectedBot.custom_name || selectedBot.name}...`}
                   disabled={isLoading}
                   className="flex-1"

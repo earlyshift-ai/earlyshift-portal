@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+declare global {
+  var webhookResults: Map<string, any> | undefined
+}
+
 /**
  * Temporary ACK endpoint that works with existing n8n webhook
  * Converts new ACK pattern to work with your current webhook structure

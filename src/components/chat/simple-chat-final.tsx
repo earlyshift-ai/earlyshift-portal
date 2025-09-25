@@ -141,9 +141,8 @@ export function SimpleChat({
               latency: payload.new.latency_ms,
             }
             
-            // Only add non-system messages
-            if (newMessage.role !== 'system') {
-              setMessages(prev => {
+            // Add the new message
+            setMessages(prev => {
                 // Check if message already exists or if it's a user message we already have
                 const exists = prev.some(m => 
                   m.id === newMessage.id || 
@@ -164,7 +163,6 @@ export function SimpleChat({
                 }
                 return prev
               })
-            }
           }
         )
         .on(

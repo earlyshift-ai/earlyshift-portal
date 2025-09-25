@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
           processing: true
         }
       })
-      .select('id')
+      .select('id, metadata')
       .single()
 
     if (assistantError) {
@@ -141,14 +141,14 @@ export async function POST(req: NextRequest) {
                 }
               })
               .eq('id', assistantPlaceholder.id)
+            
+            if (updateError) {
+              console.error('❌ Failed to update assistant message:', updateError)
+            } else {
+              console.log('💾 Assistant message updated in Supabase for', requestId)
+            }
           } else {
             console.log('⚠️ No assistant placeholder to update')
-          }
-
-          if (updateError) {
-            console.error('❌ Failed to update assistant message:', updateError)
-          } else {
-            console.log('💾 Assistant message updated in Supabase for', requestId)
           }
           
         } else {
