@@ -1,0 +1,313 @@
+'use client'
+
+import { useState, useRef, useEffect } from 'react'
+import { useChat } from '@ai-sdk/react'
+import { createClient } from '@/lib/supabase/client'
+import { useTenant } from '@/components/tenant-provider'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { MessageList } from './message-list'
+import { BotSelector } from './bot-selector'
+import { Send, Loader2, Bot, User } from 'lucide-react'
+
+interface Bot {
+  id: string
+  name: string
+  description: string
+  custom_name?: string
+  model_config: {
+    webhook_url?: string
+    model?: string
+    [key: string]: any
+  }
+}
+
+interface ChatSession {
+  id: string
+  title: string
+  bot_id: string
+  created_at: string
+}
+
+export function ChatInterface() {
+  const { tenant } = useTenant()
+  const [selectedBot, setSelectedBot] = useState<Bot | null>(null)
+  const [currentSession, setCurrentSession] = useState<ChatSession | null>(null)
+  const [availableBots, setAvailableBots] = useState<Bot[]>([])
+  const [isLoadingBots, setIsLoadingBots] = useState(true)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const supabase = createClient()
+
+  // Initialize chat with AI SDK
+  const {
+    messages,
+    input,
+    handleInputChange,
+    handleSubmit,
+    isLoading,
+    error,
+    setMessages
+  } = useChat({
+    api: '/api/chat',
+    body: {
+      botId: selectedBot?.id,
+      sessionId: currentSession?.id,
+      tenantId: tenant?.id,
+    },
+    onFinish: async (message) => {
+      // Save message to database after completion
+      if (currentSession && selectedBot) {
+        await saveMessageToDatabase(message.content, 'assistant')
+      }
+    },
+    onError: (error) => {
+      console.error('Chat error:', error)
+    }
+  })
+
+  // Load available bots for the tenant
+  useEffect(() => {
+    if (!tenant) return
+
+    loadAvailableBots()
+  }, [tenant])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const loadAvailableBots = async () => {
+    setIsLoadingBots(true)
+    try {
+      const { data, error } = await supabase
+        .from('bot_access')
+        .select(`
+          bot_id,
+          custom_name,
+          enabled,
+          bots (
+            id,
+            name,
+            description,
+            model_config,
+            status
+          )
+        `)
+        .eq('tenant_id', tenant!.id)
+        .eq('enabled', true)
+        .eq('bots.status', 'active')
+
+      if (error) throw error
+
+      const bots = data
+        .filter(item => item.bots)
+        .map(item => ({
+          id: item.bots!.id,
+          name: item.bots!.name,
+          description: item.bots!.description,
+          custom_name: item.custom_name,
+          model_config: item.bots!.model_config
+        }))
+
+      setAvailableBots(bots)
+      
+      // Auto-select first bot if none selected
+      if (bots.length > 0 && !selectedBot) {
+        setSelectedBot(bots[0])
+      }
+    } catch (error) {
+      console.error('Error loading bots:', error)
+    } finally {
+      setIsLoadingBots(false)
+    }
+  }
+
+  const createNewSession = async (botId: string) => {
+    try {
+      const { data, error } = await supabase
+        .rpc('create_chat_session', {
+          p_tenant_id: tenant!.id,
+          p_bot_id: botId,
+          p_title: `Chat with ${selectedBot?.custom_name || selectedBot?.name}`
+        })
+
+      if (error) throw error
+
+      const sessionId = data
+      
+      // Fetch the created session details
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('chat_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single()
+
+      if (sessionError) throw sessionError
+
+      setCurrentSession(sessionData)
+      setMessages([]) // Clear previous messages
+
+      return sessionData
+    } catch (error) {
+      console.error('Error creating session:', error)
+      throw error
+    }
+  }
+
+  const saveMessageToDatabase = async (content: string, role: 'user' | 'assistant') => {
+    if (!currentSession) return
+
+    try {
+      await supabase
+        .rpc('add_message', {
+          p_session_id: currentSession.id,
+          p_role: role,
+          p_content: content,
+          p_metadata: {
+            timestamp: new Date().toISOString(),
+            model: selectedBot?.model_config?.model || 'webhook'
+          }
+        })
+    } catch (error) {
+      console.error('Error saving message:', error)
+    }
+  }
+
+  const handleBotSelect = async (bot: Bot) => {
+    setSelectedBot(bot)
+    
+    // Create new session for the selected bot
+    try {
+      await createNewSession(bot.id)
+    } catch (error) {
+      console.error('Failed to create session:', error)
+    }
+  }
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!selectedBot || !input.trim()) return
+
+    // Create session if none exists
+    if (!currentSession) {
+      try {
+        await createNewSession(selectedBot.id)
+      } catch (error) {
+        console.error('Failed to create session:', error)
+        return
+      }
+    }
+
+    // Save user message to database
+    await saveMessageToDatabase(input, 'user')
+
+    // Submit to AI SDK
+    handleSubmit(e)
+  }
+
+  if (!tenant) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-500">Loading tenant information...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full max-h-[80vh] bg-white dark:bg-gray-900 rounded-lg border">
+      {/* Header */}
+      <CardHeader className="border-b">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Bot className="h-5 w-5" style={{ color: tenant.primary_color }} />
+            {selectedBot ? (
+              <span>{selectedBot.custom_name || selectedBot.name}</span>
+            ) : (
+              <span>Select a Bot</span>
+            )}
+          </CardTitle>
+          <BotSelector
+            bots={availableBots}
+            selectedBot={selectedBot}
+            onSelect={handleBotSelect}
+            isLoading={isLoadingBots}
+          />
+        </div>
+        {selectedBot && (
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {selectedBot.description}
+          </p>
+        )}
+      </CardHeader>
+
+      {/* Messages */}
+      <CardContent className="flex-1 overflow-hidden p-0">
+        <div className="h-full flex flex-col">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {selectedBot ? (
+              <>
+                <MessageList messages={messages} />
+                {isLoading && (
+                  <div className="flex items-center gap-2 text-gray-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Thinking...</span>
+                  </div>
+                )}
+                {error && (
+                  <div className="text-red-600 bg-red-50 dark:bg-red-900/20 p-3 rounded-md">
+                    Error: {error.message}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <Bot className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                    Welcome to {tenant.name}
+                  </h3>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Select a bot from the dropdown to start chatting
+                  </p>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          {selectedBot && (
+            <div className="border-t p-4">
+              <form onSubmit={onSubmit} className="flex gap-2">
+                <Input
+                  value={input}
+                  onChange={handleInputChange}
+                  placeholder={`Message ${selectedBot.custom_name || selectedBot.name}...`}
+                  disabled={isLoading}
+                  className="flex-1"
+                />
+                <Button 
+                  type="submit" 
+                  disabled={isLoading || !input.trim()}
+                  style={{ backgroundColor: tenant.primary_color }}
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </form>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </div>
+  )
+}
