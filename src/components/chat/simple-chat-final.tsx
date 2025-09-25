@@ -249,9 +249,9 @@ export function SimpleChat({
   }
 
   return (
-    <div className={`flex flex-col h-full bg-white dark:bg-gray-800 ${className}`}>
+    <div className={`flex flex-col h-full bg-white dark:bg-gray-950 ${className}`}>
       {/* Header */}
-      <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
+      <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold">{botName}</h2>
           {isProcessing && (
@@ -282,10 +282,10 @@ export function SimpleChat({
             }`}
           >
             <div
-              className={`max-w-[70%] p-3 rounded-lg ${
+              className={`max-w-[70%] p-4 rounded-2xl transition-all duration-200 ${
                 message.role === 'user'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white'
+                  ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 ml-auto'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
               }`}
             >
               <ReactMarkdown 
@@ -329,24 +329,26 @@ export function SimpleChat({
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t dark:border-gray-700">
-        <div className="flex gap-2">
+      <form onSubmit={handleSubmit} className="p-4 border-t border-gray-100 dark:border-gray-800 bg-gradient-to-b from-transparent to-gray-50 dark:to-gray-900">
+        <div className="relative max-w-4xl mx-auto">
           <Input
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder={isProcessing ? "Esperando respuesta..." : "Escribe tu mensaje..."}
+            placeholder={isProcessing ? "Waiting for response..." : "Type your message..."}
             disabled={isProcessing || isSessionLoading}
-            className="flex-1"
+            className="w-full pr-12 pl-4 py-3 rounded-2xl border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-100 focus:border-transparent transition-all shadow-sm"
           />
           <Button 
             type="submit" 
             disabled={isProcessing || isSessionLoading || !inputValue.trim()}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl px-3 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200 disabled:opacity-50 transition-all"
+            size="sm"
           >
             {isProcessing ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Send className="h-5 w-5" />
+              <Send className="h-4 w-4" />
             )}
           </Button>
         </div>
