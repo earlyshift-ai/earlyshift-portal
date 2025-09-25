@@ -172,11 +172,11 @@ export function ChatSidebar({
                 {date}
               </div>
               {dateSessions.map(session => (
-                <button
+                <div
                   key={session.id}
                   onClick={() => onSelectSession(session.id)}
                   className={cn(
-                    "w-full text-left rounded-lg px-3 py-2 mb-1 group hover:bg-gray-800 transition-colors",
+                    "w-full text-left rounded-lg px-3 py-2 mb-1 group hover:bg-gray-800 transition-colors cursor-pointer",
                     currentSessionId === session.id && "bg-gray-800"
                   )}
                 >
@@ -201,7 +201,7 @@ export function ChatSidebar({
                       <Trash2 className="h-3 w-3 text-gray-400" />
                     </button>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           ))
