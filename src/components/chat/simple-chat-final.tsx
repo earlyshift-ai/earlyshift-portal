@@ -15,6 +15,8 @@ interface Message {
   role: 'user' | 'assistant'
   timestamp: Date
   latency?: number
+  botName?: string
+  botId?: string
 }
 
 interface SimpleChatProps {
@@ -103,6 +105,8 @@ export function SimpleChat({
             role: msg.role as 'user' | 'assistant',
             timestamp: new Date(msg.created_at),
             latency: msg.latency_ms,
+            botName: msg.metadata?.bot_name || (msg.role === 'assistant' ? botName : undefined),
+            botId: msg.metadata?.bot_id || (msg.role === 'assistant' ? botId : undefined),
           }))
 
         setMessages(formattedMessages)
@@ -141,6 +145,8 @@ export function SimpleChat({
               role: payload.new.role as 'user' | 'assistant',
               timestamp: new Date(payload.new.created_at),
               latency: payload.new.latency_ms,
+              botName: payload.new.metadata?.bot_name || (payload.new.role === 'assistant' ? botName : undefined),
+              botId: payload.new.metadata?.bot_id || (payload.new.role === 'assistant' ? botId : undefined),
             }
             
             // Add the new message
@@ -347,6 +353,14 @@ export function SimpleChat({
               ) : (
                 // Assistant message - full width in center
                 <div className="w-full">
+                  {/* Bot name indicator */}
+                  {message.botName && (
+                    <div className="text-[10px] lg:text-xs text-blue-600 dark:text-blue-400 mb-1 font-medium flex items-center gap-1">
+                      <span>🤖</span>
+                      {message.botName}
+                    </div>
+                  )}
+                  
                   {/* Thinking time indicator */}
                   {message.latency && (
                     <div className="text-[10px] lg:text-xs text-gray-500 dark:text-gray-400 mb-1 lg:mb-2">

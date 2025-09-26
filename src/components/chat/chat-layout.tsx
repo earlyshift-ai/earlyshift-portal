@@ -49,6 +49,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
   const [hasInitialSession, setHasInitialSession] = useState(false)
   const sessionCreationRef = useRef<Promise<void> | null>(null)
   const [newLocalSession, setNewLocalSession] = useState<NewChatSession | null>(null)
+  const [sessionHasMessages, setSessionHasMessages] = useState(false)
   
   // Set sidebar open by default on desktop
   useEffect(() => {
@@ -68,6 +69,35 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
   useEffect(() => {
     loadBots()
   }, [tenant.id])
+
+  // Check if current session has messages to lock bot selection
+  useEffect(() => {
+    const checkSessionMessages = async () => {
+      if (!currentSessionId) {
+        setSessionHasMessages(false)
+        return
+      }
+      
+      try {
+        const { data, error } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('session_id', currentSessionId)
+          .limit(1)
+          
+        if (!error && data && data.length > 0) {
+          setSessionHasMessages(true)
+        } else {
+          setSessionHasMessages(false)
+        }
+      } catch (error) {
+        console.error('Error checking session messages:', error)
+        setSessionHasMessages(false)
+      }
+    }
+    
+    checkSessionMessages()
+  }, [currentSessionId, supabase])
   
   // Create initial session when component mounts if no session exists
   // Only run once at the very beginning
@@ -119,6 +149,9 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
       return
     }
     
+    // Reset session messages state immediately for new chat
+    setSessionHasMessages(false)
+    
     // Create a new session immediately
     const createSession = async () => {
       try {
@@ -161,12 +194,45 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
     await sessionCreationRef.current
   }
 
-  const handleSelectSession = (sessionId: string) => {
+  const handleSelectSession = async (sessionId: string) => {
     setCurrentSessionId(sessionId)
     // Clear local session when selecting a different session
     if (newLocalSession?.id !== sessionId) {
       setNewLocalSession(null)
     }
+    
+    // Get the bot associated with this session and update selected bot
+    try {
+      const { data: session, error } = await supabase
+        .from('chat_sessions')
+        .select(`
+          bot_id,
+          bots!inner (
+            id,
+            name,
+            description,
+            model_config
+          )
+        `)
+        .eq('id', sessionId)
+        .single()
+        
+      if (!error && session?.bots) {
+        const botData = session.bots as any
+        const sessionBot = {
+          id: botData.id,
+          name: botData.name,
+          description: botData.description,
+          model_config: botData.model_config
+        }
+        setSelectedBot(sessionBot as Bot)
+      }
+    } catch (error) {
+      console.error('Error getting session bot:', error)
+    }
+    
+    // The useEffect for checking session messages will run and update sessionHasMessages
+    // when currentSessionId changes, so we don't need to manually check here
   }
   
   const handleFirstMessage = (sessionId: string, messageText: string) => {
@@ -177,6 +243,9 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
       title: messageText.slice(0, 100),
       botName: selectedBot?.name
     })
+    
+    // Lock the bot selector immediately when a message is sent
+    setSessionHasMessages(true)
   }
 
   const handleBotChange = async (bot: Bot) => {
@@ -251,14 +320,23 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
               {mounted ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10">
+                    <Button 
+                      variant="ghost" 
+                      className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10"
+                      disabled={sessionHasMessages}
+                    >
                       <Bot className="h-4 w-4" />
                       <span className="font-medium text-sm lg:text-base truncate max-w-[120px] lg:max-w-none">
                         {selectedBot?.name || 'Select a bot'}
                       </span>
-                      <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4" />
+                      {sessionHasMessages ? (
+                        <div className="text-xs text-gray-500 ml-1" title="Bot locked for this conversation">🔒</div>
+                      ) : (
+                        <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4" />
+                      )}
                     </Button>
                   </DropdownMenuTrigger>
+                  {!sessionHasMessages && (
                 <DropdownMenuContent align="start" className="w-64">
                   <DropdownMenuLabel>Available Bots</DropdownMenuLabel>
                   <DropdownMenuSeparator />
@@ -287,6 +365,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
                     </div>
                   )}
                 </DropdownMenuContent>
+                  )}
                 </DropdownMenu>
               ) : (
                 <Button variant="ghost" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10" disabled>
