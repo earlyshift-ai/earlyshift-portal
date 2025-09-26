@@ -193,7 +193,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-gradient-to-br from-gray-50 to-white dark:from-gray-950 dark:to-gray-900">
+    <div className="h-dvh w-screen overflow-hidden bg-gradient-to-br from-gray-50 to-white dark:from-gray-950 dark:to-gray-900 fixed inset-0">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
@@ -233,11 +233,11 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
 
       {/* Main Chat Area - Takes full screen */}
       <main className={cn(
-        "w-full h-full flex flex-col transition-all duration-300",
+        "w-full h-full flex flex-col transition-all duration-300 overflow-hidden",
         sidebarOpen ? "lg:pl-[320px]" : "pl-0"
       )}>
         {/* Top Bar */}
-        <div className="border-b border-gray-200 dark:border-gray-800 px-2 lg:px-4 py-2 lg:py-3 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+        <div className="border-b border-gray-200 dark:border-gray-800 px-2 lg:px-4 py-2 lg:py-3 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm flex-shrink-0">
           <div className="flex items-center justify-between">
             {/* Bot Selector */}
             <div className="flex items-center gap-1 lg:gap-3">
@@ -341,7 +341,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
         </div>
 
         {/* Chat Component */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-h-0">
           {selectedBot ? (
             <SimpleChat
               key={`${selectedBot.id}-${currentSessionId || 'new'}`}

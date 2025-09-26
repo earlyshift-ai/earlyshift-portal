@@ -116,7 +116,19 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
+  html, body {
     @apply bg-background text-foreground;
+    /* Prevent mobile scroll bounce */
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  
+  /* Support for dynamic viewport height on mobile */
+  @supports (height: 100dvh) {
+    html, body {
+      height: 100dvh;
+    }
   }
 }
