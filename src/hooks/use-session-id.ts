@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface UseSessionIdReturn {
   sessionId: string | null
@@ -16,6 +16,9 @@ export function useSessionId(botId?: string, tenantId?: string): UseSessionIdRet
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  // Prevent concurrent session creation for the same bot
+  const creationInProgressRef = useRef<Promise<string> | null>(null)
 
   // If botId is not provided, return early with null values
   // This happens when we have an external session
@@ -24,37 +27,56 @@ export function useSessionId(botId?: string, tenantId?: string): UseSessionIdRet
   const sessionKey = botId ? `sessionId:${botId}` : 'sessionId:default'
 
   const createNewSession = useCallback(async (): Promise<string> => {
+    // Check if session creation is already in progress for this bot
+    if (creationInProgressRef.current) {
+      console.log('🔄 Session creation already in progress, waiting for existing request...')
+      return await creationInProgressRef.current
+    }
+    
     console.log('🆕 Creating new session for bot:', botId)
     
-    const response = await fetch('/api/session', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        botId,
-        tenantId,
-        // Note: userId will be extracted from auth in the API
-      }),
-    })
+    const sessionCreation = (async () => {
+      const response = await fetch('/api/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          botId,
+          tenantId,
+          // Note: userId will be extracted from auth in the API
+        }),
+      })
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.error || `HTTP ${response.status}`)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const data = await response.json()
+      const newSessionId = data.sessionId
+
+      if (!newSessionId) {
+        throw new Error('No sessionId returned from API')
+      }
+
+      // Store in localStorage
+      localStorage.setItem(sessionKey, newSessionId)
+      console.log('💾 Session stored:', newSessionId)
+
+      return newSessionId
+    })()
+    
+    // Store the promise to prevent concurrent requests
+    creationInProgressRef.current = sessionCreation
+    
+    try {
+      const result = await sessionCreation
+      return result
+    } finally {
+      // Clear the promise when done
+      creationInProgressRef.current = null
     }
-
-    const data = await response.json()
-    const newSessionId = data.sessionId
-
-    if (!newSessionId) {
-      throw new Error('No sessionId returned from API')
-    }
-
-    // Store in localStorage
-    localStorage.setItem(sessionKey, newSessionId)
-    console.log('💾 Session stored:', newSessionId)
-
-    return newSessionId
   }, [botId, tenantId, sessionKey])
 
   const loadOrCreateSession = useCallback(async () => {

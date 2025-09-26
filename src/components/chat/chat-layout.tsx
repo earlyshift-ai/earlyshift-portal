@@ -50,8 +50,7 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   const [sidebarOpen, setSidebarOpen] = useState(false) // Default to closed on mobile, open on desktop
   const [mounted, setMounted] = useState(false)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
-  const [hasInitialSession, setHasInitialSession] = useState(false)
-  const sessionCreationRef = useRef<Promise<void> | null>(null)
+  const sessionCreationRef = useRef<Promise<string | null> | null>(null)
   const [newLocalSession, setNewLocalSession] = useState<NewChatSession | null>(null)
   const [sessionHasMessages, setSessionHasMessages] = useState(false)
   
@@ -78,6 +77,7 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   useEffect(() => {
     const checkSessionMessages = async () => {
       if (!currentSessionId) {
+        console.log('🔓 No currentSessionId - unlocking bot selector')
         setSessionHasMessages(false)
         return
       }
@@ -90,8 +90,10 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
           .limit(1)
           
         if (!error && data && data.length > 0) {
+          console.log('🔒 Session has messages - locking bot selector')
           setSessionHasMessages(true)
         } else {
+          console.log('🔓 Session has no messages - unlocking bot selector')
           setSessionHasMessages(false)
         }
       } catch (error) {
@@ -103,16 +105,6 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
     checkSessionMessages()
   }, [currentSessionId, supabase])
   
-  // Create initial session when component mounts if no session exists
-  // Only run once at the very beginning
-  useEffect(() => {
-    if (selectedBot && !currentSessionId && mounted && !hasInitialSession) {
-      console.log('Creating initial session for bot:', selectedBot.id)
-      setHasInitialSession(true)
-      handleNewChat()
-    }
-  }, []) // Empty dependency array - only run once on mount
-
   const loadBots = async () => {
     try {
       const { data: userBots } = await supabase
@@ -139,24 +131,26 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   }
 
   const handleNewChat = async () => {
-    if (!selectedBot) return
+    console.log('🆕 Parent handleNewChat called - this should only create sessions when user sends first message')
+    
+    if (!selectedBot) return null
+    
+    // Reset session messages state immediately for new chat
+    setSessionHasMessages(false)
     
     // Prevent concurrent session creation
     if (sessionCreationRef.current) {
       console.log('⏳ Session creation already in progress, waiting...')
       await sessionCreationRef.current
-      return
+      return currentSessionId || null
     }
     
     if (isCreatingSession) {
       console.log('🚫 Already creating session, skipping duplicate call')
-      return
+      return currentSessionId || null
     }
     
-    // Reset session messages state immediately for new chat
-    setSessionHasMessages(false)
-    
-    // Create a new session immediately
+    // Create a new session
     const createSession = async () => {
       try {
         setIsCreatingSession(true)
@@ -185,9 +179,15 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
           // Clear localStorage to prevent reusing old sessions
           const sessionKey = `sessionId:${selectedBot.id}`
           localStorage.removeItem(sessionKey)
+          
+          return newSessionId
+        } else {
+          console.error('Failed to create session:', response.status)
+          return null
         }
       } catch (error) {
         console.error('Failed to create new session:', error)
+        return null
       } finally {
         setIsCreatingSession(false)
         sessionCreationRef.current = null
@@ -195,7 +195,8 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
     }
     
     sessionCreationRef.current = createSession()
-    await sessionCreationRef.current
+    const result = await sessionCreationRef.current
+    return result || null
   }
 
   const handleSelectSession = async (sessionId: string) => {
@@ -253,14 +254,13 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   }
 
   const handleBotChange = async (bot: Bot) => {
-    // Clear current session first
-    setCurrentSessionId(undefined)
+    // Clear current session and switch to new bot
     setSelectedBot(bot)
-    
-    // Wait a tick to ensure state is updated
-    setTimeout(() => {
-      handleNewChat() // Start new chat when changing bot
-    }, 0)
+    setSessionHasMessages(false)
+    setNewLocalSession(null)
+    // Clear current session ID AFTER setting the new bot to prevent race conditions
+    setCurrentSessionId(undefined)
+    // Don't create a new session automatically - wait for user to send a message
   }
 
   return (
@@ -291,9 +291,18 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
             currentBotName={selectedBot?.name}
             newLocalSession={newLocalSession}
             onNewChat={() => {
-              handleNewChat()
-              setNewLocalSession(null) // Clear local session on new chat
+              // Clear current session - new one will be created when user sends first message
+              console.log('🆕 Sidebar New Chat clicked - clearing all session state')
+              setCurrentSessionId(undefined)
+              setSessionHasMessages(false)
+              setNewLocalSession(null)
               setSidebarOpen(false) // Close sidebar on mobile after action
+              
+              // Clear localStorage to force useSessionId to create a fresh session
+              if (selectedBot) {
+                const sessionKey = `sessionId:${selectedBot.id}`
+                localStorage.removeItem(sessionKey)
+              }
             }}
             onSelectSession={(id) => {
               handleSelectSession(id)
@@ -394,7 +403,7 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
         <div className="flex-1 overflow-hidden min-h-0">
           {selectedBot ? (
             <SimpleChat
-              key={`${selectedBot.id}-${currentSessionId || 'new'}`}
+              key={`chat-${selectedBot.id}`}
               botName={selectedBot.name}
               botId={selectedBot.id}
               userId={user.id}

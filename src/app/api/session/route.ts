@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       sessionData = data
     } else {
       // Check for recent duplicate sessions first
-      const oneMinuteAgo = new Date(Date.now() - 60000).toISOString()
+      const fiveMinutesAgo = new Date(Date.now() - 300000).toISOString()
       const { data: recentSessions } = await supabase
         .from('chat_sessions')
         .select('id, created_at')
@@ -86,12 +86,12 @@ export async function POST(req: NextRequest) {
         .eq('user_id', currentUserId)
         .eq('bot_id', botId)
         .eq('status', 'active')
-        .gte('created_at', oneMinuteAgo)
+        .gte('created_at', fiveMinutesAgo)
         .order('created_at', { ascending: false })
         .limit(1)
 
       if (recentSessions && recentSessions.length > 0) {
-        console.log('⚠️ Found recent session created less than 1 minute ago, reusing:', recentSessions[0].id)
+        console.log('⚠️ Found recent session created less than 5 minutes ago, reusing:', recentSessions[0].id)
         sessionData = recentSessions[0]
       } else {
         // Create new session

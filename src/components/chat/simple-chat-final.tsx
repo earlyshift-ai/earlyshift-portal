@@ -26,7 +26,7 @@ interface SimpleChatProps {
   tenantId?: string
   sessionId?: string
   className?: string
-  onNewChat?: () => void
+  onNewChat?: () => Promise<string | null>
   onFirstMessage?: (sessionId: string, messageText: string) => void
 }
 
@@ -74,7 +74,10 @@ export function SimpleChat({
   useEffect(() => {
     if (!sessionId) {
       // Clear messages when no session
+      console.log('🧹 No session ID - clearing messages and state')
       setMessages([])
+      setHasUserMessage(false)
+      setIsProcessing(false)
       return
     }
 
@@ -224,16 +227,36 @@ export function SimpleChat({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!inputValue.trim() || isProcessing || !sessionId) return
+    if (!inputValue.trim() || isProcessing) return
 
     const messageText = inputValue.trim()
     setInputValue('')
     setIsProcessing(true)
     
+    // If no session exists, create one first
+    let activeSessionId = sessionId
+    if (!activeSessionId && onNewChat) {
+      console.log('🆕 No session exists, creating new session for first message')
+      activeSessionId = await onNewChat()
+      if (!activeSessionId) {
+        console.error('❌ Failed to create session')
+        setIsProcessing(false)
+        setInputValue(messageText) // Restore input
+        return
+      }
+    }
+    
+    if (!activeSessionId) {
+      console.error('❌ No session ID available')
+      setIsProcessing(false)
+      setInputValue(messageText) // Restore input
+      return
+    }
+    
     // If this is the first user message, notify parent to update sidebar
     if (!hasUserMessage && onFirstMessage) {
       console.log('📝 First message in session, notifying parent')
-      onFirstMessage(sessionId, messageText)
+      onFirstMessage(activeSessionId, messageText)
       setHasUserMessage(true)
     }
     
@@ -254,7 +277,7 @@ export function SimpleChat({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          sessionId,
+          sessionId: activeSessionId,
           text: messageText,
           userId,
           botId,
@@ -276,17 +299,19 @@ export function SimpleChat({
   }
 
   const handleNewChat = async () => {
-    console.log('🆕 Starting new chat')
+    console.log('🆕 SimpleChat New Chat clicked - clearing local state only')
     setHasUserMessage(false) // Reset for new chat
-    if (onNewChat) {
-      // Use parent's new chat handler if provided
-      onNewChat()
-    } else {
-      // Fallback to local refresh
-      setMessages([])
-      setIsProcessing(false)
-      await refreshSession()
-    }
+    
+    // Always clear local state first
+    setMessages([])
+    setIsProcessing(false)
+    
+    // Clear session from localStorage to force fresh session creation on next message
+    clearSession()
+    
+    // Don't call parent's onNewChat which creates a session immediately
+    // Just clear state and let user send first message to create session
+    console.log('🧹 Chat cleared - ready for new conversation')
   }
 
   // Only show loading if we're actually loading a session
