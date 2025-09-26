@@ -25,32 +25,35 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Verify user has access to this tenant and bot
-    const { data: botAccess, error: accessError } = await supabase
-      .from('bot_access')
-      .select(`
-        enabled,
-        bots (
-          id,
-          name,
-          model_config,
-          system_prompt,
-          status
-        )
-      `)
-      .eq('tenant_id', tenantId)
-      .eq('bot_id', botId)
-      .eq('enabled', true)
-      .single()
+    // Verify user has access to this specific bot (considering user-specific permissions)
+    const { data: hasAccess } = await supabase
+      .rpc('user_has_bot_access', {
+        p_user_id: user.id,
+        p_tenant_id: tenantId,
+        p_bot_id: botId
+      })
 
-    if (accessError || !botAccess || !botAccess.bots) {
+    if (!hasAccess) {
       return NextResponse.json(
         { error: 'Bot not found or access denied' },
         { status: 403 }
       )
     }
 
-    const bot = botAccess.bots as any
+    // Get bot details
+    const { data: bot, error: botError } = await supabase
+      .from('bots')
+      .select('id, name, model_config, system_prompt, status')
+      .eq('id', botId)
+      .eq('status', 'active')
+      .single()
+
+    if (botError || !bot) {
+      return NextResponse.json(
+        { error: 'Bot not found' },
+        { status: 404 }
+      )
+    }
     const modelConfig = bot.model_config as Record<string, unknown>
 
     // Get the last user message

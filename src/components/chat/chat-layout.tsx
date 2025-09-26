@@ -81,21 +81,19 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
 
   const loadBots = async () => {
     try {
-      const { data: botAccess } = await supabase
-        .from('bot_access')
-        .select(`
-          *,
-          bots (
-            id,
-            name,
-            description,
-            model_config
-          )
-        `)
-        .eq('tenant_id', tenant.id)
-        .eq('enabled', true)
+      const { data: userBots } = await supabase
+        .rpc('get_user_accessible_bots', { 
+          p_user_id: user.id,
+          p_tenant_id: tenant.id 
+        })
 
-      const bots = botAccess?.map(access => access.bots).filter(Boolean) || []
+      const bots = userBots?.map((bot: any) => ({
+        id: bot.bot_id,
+        name: bot.bot_name,
+        description: bot.bot_description,
+        model_config: bot.model_config
+      })) || []
+      
       setAvailableBots(bots as Bot[])
       
       if (bots.length > 0 && !selectedBot) {

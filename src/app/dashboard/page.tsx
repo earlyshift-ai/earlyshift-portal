@@ -54,22 +54,19 @@ export default async function DashboardPage() {
     )
   }
 
-  // Get bots that this tenant has access to
-  const { data: botAccess, error: botAccessError } = await supabase
-    .from('bot_access')
-    .select(`
-      *,
-      bots (
-        id,
-        name,
-        description,
-        model_config
-      )
-    `)
-    .eq('tenant_id', (tenant as any).id)
-    .eq('enabled', true)
+  // Get bots that this user has access to (considering user-specific permissions)
+  const { data: userBots, error: botAccessError } = await supabase
+    .rpc('get_user_accessible_bots', { 
+      p_user_id: user.id,
+      p_tenant_id: (tenant as any).id 
+    })
 
-  const availableBots = botAccess?.map(access => access.bots).filter(Boolean) || []
+  const availableBots = userBots?.map((bot: any) => ({
+    id: bot.bot_id,
+    name: bot.bot_name,
+    description: bot.bot_description,
+    model_config: bot.model_config
+  })) || []
 
   return (
     <TenantProvider initialTenant={tenant as any}>
