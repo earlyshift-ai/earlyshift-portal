@@ -21,6 +21,15 @@ export const metadata: Metadata = {
     maximumScale: 1,
     userScalable: false,
   },
+  icons: {
+    icon: [
+      { url: '/favicon.ico?v=2', sizes: 'any' },
+      { url: '/favicon.png?v=2', sizes: '32x32', type: 'image/png' },
+      { url: '/logo.png?v=2', sizes: '192x192', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico?v=2',
+    apple: '/logo.png?v=2',
+  },
 };
 
 export default function RootLayout({
