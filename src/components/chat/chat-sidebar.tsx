@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react'
 import { Plus, Search, MoreHorizontal, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
+import { ContextMenu, DeleteConfirmationModal, RenameModal } from '@/components/ui/context-menu'
+import { Toast } from '@/components/ui/toast'
 
 interface ChatSession {
   id: string
@@ -51,6 +53,52 @@ export function ChatSidebar({
   const [searchLoading, setSearchLoading] = useState(false)
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    isOpen: boolean
+    sessionId: string
+    sessionTitle: string
+    position: { x: number; y: number }
+  }>({
+    isOpen: false,
+    sessionId: '',
+    sessionTitle: '',
+    position: { x: 0, y: 0 }
+  })
+  
+  // Modal states
+  const [deleteModal, setDeleteModal] = useState<{
+    isOpen: boolean
+    sessionId: string
+    sessionTitle: string
+  }>({
+    isOpen: false,
+    sessionId: '',
+    sessionTitle: ''
+  })
+  
+  const [renameModal, setRenameModal] = useState<{
+    isOpen: boolean
+    sessionId: string
+    currentTitle: string
+  }>({
+    isOpen: false,
+    sessionId: '',
+    currentTitle: ''
+  })
+  
+  // Toast state
+  const [toast, setToast] = useState<{
+    isOpen: boolean
+    message: string
+    type: 'success' | 'error' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    message: '',
+    type: 'info'
+  })
+  
   const supabase = createClient()
 
   useEffect(() => {
@@ -69,8 +117,10 @@ export function ChatSidebar({
         },
         (payload) => {
           console.log('📨 New session created:', payload.new)
-          // Reload sessions to get the correct bot name and avoid duplicates
-          loadSessions()
+          // Only reload if the new session is not our local session
+          if (!newLocalSession || payload.new.id !== newLocalSession.id) {
+            loadSessions()
+          }
         }
       )
       .on(
@@ -83,8 +133,12 @@ export function ChatSidebar({
         },
         (payload) => {
           console.log('🔄 Session updated:', payload.new)
-          // Reload sessions to ensure consistency
-          loadSessions()
+          // Update the specific session in state instead of reloading all
+          setSessions(prev => prev.map(session => 
+            session.id === payload.new.id 
+              ? { ...session, title: payload.new.title || session.title, last_message_at: payload.new.last_message_at || session.last_message_at }
+              : session
+          ))
         }
       )
       .subscribe()
@@ -92,10 +146,26 @@ export function ChatSidebar({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [userId, tenantId, currentBotName])
+  }, [userId, tenantId])
 
-  // Remove this effect - let realtime subscriptions handle session updates
-  // This was causing duplicate sessions
+  // Update sessions when newLocalSession changes
+  useEffect(() => {
+    if (newLocalSession) {
+      // Check if this session already exists in our sessions list
+      const existingSession = sessions.find(s => s.id === newLocalSession.id)
+      if (!existingSession) {
+        // Add the new local session to the sessions list immediately
+        const localSession: ChatSession = {
+          id: newLocalSession.id,
+          title: newLocalSession.title || 'New Chat',
+          created_at: new Date().toISOString(),
+          last_message_at: new Date().toISOString(),
+          bot_name: newLocalSession.botName
+        }
+        setSessions(prev => [localSession, ...prev])
+      }
+    }
+  }, [newLocalSession])
 
   const loadSessions = async () => {
     // Prevent concurrent loads
@@ -137,25 +207,124 @@ export function ChatSidebar({
     }
   }
 
-  const deleteSession = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    
+  const deleteSession = async (sessionId: string) => {
     try {
-      const { error } = await supabase
-        .from('chat_sessions')
-        .update({ status: 'deleted' })
-        .eq('id', sessionId)
+      const response = await fetch(`/api/session?sessionId=${sessionId}`, {
+        method: 'DELETE',
+      })
 
-      if (error) throw error
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to delete session')
+      }
       
       if (currentSessionId === sessionId) {
         onNewChat()
       }
       
       loadSessions()
+      setToast({
+        isOpen: true,
+        message: 'Chat deleted successfully',
+        type: 'success'
+      })
     } catch (error) {
       console.error('Error deleting session:', error)
+      setToast({
+        isOpen: true,
+        message: 'Failed to delete chat',
+        type: 'error'
+      })
     }
+  }
+
+  const renameSession = async (sessionId: string, newTitle: string) => {
+    try {
+      const response = await fetch(`/api/session?sessionId=${sessionId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: newTitle }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to rename session')
+      }
+      
+      loadSessions()
+      setToast({
+        isOpen: true,
+        message: 'Chat renamed successfully',
+        type: 'success'
+      })
+    } catch (error) {
+      console.error('Error renaming session:', error)
+      setToast({
+        isOpen: true,
+        message: 'Failed to rename chat',
+        type: 'error'
+      })
+    }
+  }
+
+  const copySessionId = async (sessionId: string) => {
+    try {
+      await navigator.clipboard.writeText(sessionId)
+      setToast({
+        isOpen: true,
+        message: 'Conversation ID copied to clipboard',
+        type: 'success'
+      })
+    } catch (error) {
+      console.error('Failed to copy session ID:', error)
+      setToast({
+        isOpen: true,
+        message: 'Failed to copy conversation ID',
+        type: 'error'
+      })
+    }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent, sessionId: string, sessionTitle: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    setContextMenu({
+      isOpen: true,
+      sessionId,
+      sessionTitle,
+      position: {
+        x: e.clientX,
+        y: e.clientY
+      }
+    })
+  }
+
+  const closeContextMenu = () => {
+    setContextMenu(prev => ({ ...prev, isOpen: false }))
+  }
+
+  const handleRename = () => {
+    setRenameModal({
+      isOpen: true,
+      sessionId: contextMenu.sessionId,
+      currentTitle: contextMenu.sessionTitle
+    })
+  }
+
+  const handleDelete = () => {
+    setDeleteModal({
+      isOpen: true,
+      sessionId: contextMenu.sessionId,
+      sessionTitle: contextMenu.sessionTitle
+    })
+  }
+
+  const handleCopyId = () => {
+    copySessionId(contextMenu.sessionId)
   }
 
   const formatDate = (dateString: string) => {
@@ -184,21 +353,8 @@ export function ChatSidebar({
     return groups
   }
 
-  // Combine database sessions with local session
-  const displaySessions = [...sessions]
-  
-  // Add local session if it exists and isn't already in the list
-  if (newLocalSession && !sessions.some(s => s.id === newLocalSession.id)) {
-    displaySessions.unshift({
-      id: newLocalSession.id,
-      title: newLocalSession.title || 'New Chat',
-      created_at: new Date().toISOString(),
-      last_message_at: new Date().toISOString(),
-      bot_name: newLocalSession.botName
-    })
-  }
-  
-  const groupedSessions = groupSessionsByDate(displaySessions)
+  // Use sessions directly - they now include the local session
+  const groupedSessions = groupSessionsByDate(sessions)
 
   // Handle search with debouncing
   const handleSearch = async (query: string) => {
@@ -427,7 +583,7 @@ export function ChatSidebar({
                       )}
                     </div>
                     <button
-                      onClick={(e) => deleteSession(session.id, e)}
+                      onClick={(e) => handleContextMenu(e, session.id, session.title)}
                       className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-opacity ml-2 flex-shrink-0"
                     >
                       <MoreHorizontal className="h-4 w-4 text-gray-400" />
@@ -449,6 +605,42 @@ export function ChatSidebar({
           <span className="text-[14px] truncate flex-1 text-left">{userEmail || 'User'}</span>
         </button>
       </div>
+
+      {/* Context Menu */}
+      <ContextMenu
+        isOpen={contextMenu.isOpen}
+        onClose={closeContextMenu}
+        onRename={handleRename}
+        onDelete={handleDelete}
+        onCopyId={handleCopyId}
+        position={contextMenu.position}
+        sessionTitle={contextMenu.sessionTitle}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={() => deleteSession(deleteModal.sessionId)}
+        sessionTitle={deleteModal.sessionTitle}
+      />
+
+      {/* Rename Modal */}
+      <RenameModal
+        isOpen={renameModal.isOpen}
+        onClose={() => setRenameModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={(newTitle) => renameSession(renameModal.sessionId, newTitle)}
+        currentTitle={renameModal.currentTitle}
+      />
+
+      {/* Toast Notifications */}
+      {toast.isOpen && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(prev => ({ ...prev, isOpen: false }))}
+        />
+      )}
     </div>
   )
 }

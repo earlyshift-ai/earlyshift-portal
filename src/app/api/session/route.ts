@@ -177,3 +177,154 @@ export async function GET(req: NextRequest) {
     )
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const sessionId = searchParams.get('sessionId')
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: 'Missing sessionId parameter' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = await createClient()
+
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User must be authenticated' },
+        { status: 401 }
+      )
+    }
+
+    // Verify user owns this session and update status to 'deleted'
+    const { data, error } = await supabase
+      .from('chat_sessions')
+      .update({ 
+        status: 'deleted',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .eq('user_id', user.id) // Ensure user owns the session
+      .select('id')
+      .single()
+
+    if (error) {
+      console.error('Session deletion error:', error)
+      return NextResponse.json(
+        { error: 'Failed to delete session', details: error.message },
+        { status: 500 }
+      )
+    }
+
+    if (!data) {
+      return NextResponse.json(
+        { error: 'Session not found or access denied' },
+        { status: 404 }
+      )
+    }
+
+    console.log('✅ Session deleted:', sessionId)
+
+    return NextResponse.json({
+      success: true,
+      message: 'Session deleted successfully'
+    })
+
+  } catch (error: any) {
+    console.error('Session DELETE error:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete session', details: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const sessionId = searchParams.get('sessionId')
+    
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: 'Missing sessionId parameter' },
+        { status: 400 }
+      )
+    }
+
+    const body = await req.json()
+    const { title } = body
+
+    if (!title || typeof title !== 'string' || title.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'Valid title is required' },
+        { status: 400 }
+      )
+    }
+
+    if (title.length > 100) {
+      return NextResponse.json(
+        { error: 'Title cannot exceed 100 characters' },
+        { status: 400 }
+      )
+    }
+
+    const supabase = await createClient()
+
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User must be authenticated' },
+        { status: 401 }
+      )
+    }
+
+    // Update session title
+    const { data, error } = await supabase
+      .from('chat_sessions')
+      .update({ 
+        title: title.trim(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .eq('user_id', user.id) // Ensure user owns the session
+      .select('id, title')
+      .single()
+
+    if (error) {
+      console.error('Session update error:', error)
+      return NextResponse.json(
+        { error: 'Failed to update session', details: error.message },
+        { status: 500 }
+      )
+    }
+
+    if (!data) {
+      return NextResponse.json(
+        { error: 'Session not found or access denied' },
+        { status: 404 }
+      )
+    }
+
+    console.log('✅ Session title updated:', sessionId, 'to:', title.trim())
+
+    return NextResponse.json({
+      success: true,
+      sessionId: data.id,
+      title: data.title,
+      message: 'Session title updated successfully'
+    })
+
+  } catch (error: any) {
+    console.error('Session PUT error:', error)
+    return NextResponse.json(
+      { error: 'Failed to update session', details: error.message },
+      { status: 500 }
+    )
+  }
+}

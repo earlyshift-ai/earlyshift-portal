@@ -47,15 +47,17 @@ export function SimpleChat({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<any>(null)
   
-  // Session management - use external sessionId if provided
-  // Only use the hook if no external session is provided
+  // Session management - prevent hook from running when we have an external session
+  const shouldUseHook = !externalSessionId && botId
+  console.log('🔧 SimpleChat session logic:', { externalSessionId, botId, shouldUseHook })
+  
   const { 
     sessionId: generatedSessionId, 
     isLoading: isSessionLoading, 
     error: sessionError, 
     refresh: refreshSession,
     clearSession 
-  } = useSessionId(externalSessionId ? undefined : botId, externalSessionId ? undefined : tenantId)
+  } = useSessionId(shouldUseHook ? botId : undefined, shouldUseHook ? tenantId : undefined)
   
   const sessionId = externalSessionId || generatedSessionId
 

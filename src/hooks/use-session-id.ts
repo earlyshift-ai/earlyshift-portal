@@ -76,19 +76,29 @@ export function useSessionId(botId?: string, tenantId?: string): UseSessionIdRet
             console.log('✅ Session verified:', storedSessionId)
             setSessionId(storedSessionId)
             return
-          } else {
-            console.log('❌ Stored session invalid, creating new one')
+          } else if (response.status === 404) {
+            console.log('❌ Stored session not found in database, clearing localStorage')
             localStorage.removeItem(sessionKey)
+          } else {
+            console.log('❌ Session verification failed with status:', response.status)
+            // Don't remove from localStorage for non-404 errors, might be temporary server issue
           }
         } catch (verifyError) {
-          console.log('❌ Session verification failed, creating new one')
-          localStorage.removeItem(sessionKey)
+          console.log('❌ Session verification network error, keeping localStorage for retry')
+          // Don't remove from localStorage for network errors
         }
       }
 
-      // Create new session if none found or verification failed
-      const newSessionId = await createNewSession()
-      setSessionId(newSessionId)
+      // Only create new session if we don't have a stored one or it was confirmed deleted
+      if (!storedSessionId || !localStorage.getItem(sessionKey)) {
+        console.log('🆕 Creating new session because no valid stored session found')
+        const newSessionId = await createNewSession()
+        setSessionId(newSessionId)
+      } else {
+        // If we have a stored session but verification failed (non-404), use it anyway
+        console.log('📝 Using stored session despite verification failure (might be temporary server issue)')
+        setSessionId(storedSessionId)
+      }
 
     } catch (err: any) {
       console.error('Session load/create error:', err)
@@ -127,11 +137,20 @@ export function useSessionId(botId?: string, tenantId?: string): UseSessionIdRet
   // Initialize session on mount
   useEffect(() => {
     if (skipHook) {
+      console.log('🚫 Skipping useSessionId hook - external session provided')
       setIsLoading(false)
       return
     }
+    
+    if (!botId) {
+      console.log('🚫 Skipping useSessionId hook - no botId provided')
+      setIsLoading(false)
+      return
+    }
+    
+    console.log('🔧 Initializing session for bot:', botId)
     loadOrCreateSession()
-  }, [loadOrCreateSession, skipHook])
+  }, [loadOrCreateSession, skipHook, botId])
 
   // Return early if hook is skipped
   if (skipHook) {
