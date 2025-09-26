@@ -1,11 +1,19 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Search, MoreHorizontal, X } from 'lucide-react'
+import { Plus, Search, MoreHorizontal, X, LogOut, ChevronDown } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { ContextMenu, DeleteConfirmationModal, RenameModal } from '@/components/ui/context-menu'
 import { Toast } from '@/components/ui/toast'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { useRouter } from 'next/navigation'
 
 interface ChatSession {
   id: string
@@ -19,6 +27,7 @@ interface ChatSidebarProps {
   tenantId: string
   userId: string
   userEmail?: string
+  userName?: string
   tenantName?: string
   tenantLogo?: string
   currentSessionId?: string
@@ -36,6 +45,7 @@ export function ChatSidebar({
   tenantId, 
   userId,
   userEmail,
+  userName,
   tenantName,
   tenantLogo,
   currentSessionId,
@@ -44,6 +54,7 @@ export function ChatSidebar({
   onNewChat,
   onSelectSession 
 }: ChatSidebarProps) {
+  const router = useRouter()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
   const loadingRef = useRef(false)
@@ -291,15 +302,31 @@ export function ChatSidebar({
     e.preventDefault()
     e.stopPropagation()
     
-    const rect = (e.target as HTMLElement).getBoundingClientRect()
+    const button = e.currentTarget as HTMLElement
+    const rect = button.getBoundingClientRect()
+    
+    // Calculate position to keep menu on screen
+    const menuWidth = 250 // Approximate menu width
+    const menuHeight = 300 // Approximate menu height
+    
+    let x = rect.right + 5 // Position to the right of the button
+    let y = rect.top
+    
+    // Adjust if menu would go off right edge
+    if (x + menuWidth > window.innerWidth) {
+      x = rect.left - menuWidth - 5 // Position to the left instead
+    }
+    
+    // Adjust if menu would go off bottom edge  
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10
+    }
+    
     setContextMenu({
       isOpen: true,
       sessionId,
       sessionTitle,
-      position: {
-        x: e.clientX,
-        y: e.clientY
-      }
+      position: { x, y }
     })
   }
 
@@ -584,9 +611,10 @@ export function ChatSidebar({
                     </div>
                     <button
                       onClick={(e) => handleContextMenu(e, session.id, session.title)}
-                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-opacity ml-2 flex-shrink-0"
+                      className="md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100 opacity-50 hover:opacity-100 p-1 hover:bg-gray-700 rounded transition-all ml-2 flex-shrink-0"
+                      aria-label="More options"
                     >
-                      <MoreHorizontal className="h-4 w-4 text-gray-400" />
+                      <MoreHorizontal className="h-4 w-4 text-gray-400 hover:text-gray-200" />
                     </button>
                   </div>
                 </div>
@@ -598,12 +626,34 @@ export function ChatSidebar({
 
       {/* User Profile */}
       <div className="flex-shrink-0 border-t border-gray-800 p-3">
-        <button className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 rounded-lg transition-colors">
-          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
-            {userEmail ? userEmail.charAt(0).toUpperCase() : 'U'}
-          </div>
-          <span className="text-[14px] truncate flex-1 text-left">{userEmail || 'User'}</span>
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 rounded-lg transition-colors group">
+              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
+                {userName ? userName.charAt(0).toUpperCase() : userEmail ? userEmail.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <span className="text-[14px] truncate flex-1 text-left">{userName || userEmail || 'User'}</span>
+              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent 
+            align="start" 
+            side="top" 
+            className="w-[280px] bg-[#212121] border-gray-700 text-white mb-2"
+          >
+            <DropdownMenuItem 
+              onClick={async () => {
+                const supabase = createClient()
+                await supabase.auth.signOut()
+                router.push('/auth/login')
+              }}
+              className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer text-red-400 focus:text-red-400"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Log Out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Context Menu */}

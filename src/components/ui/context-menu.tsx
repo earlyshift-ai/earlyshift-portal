@@ -49,15 +49,19 @@ export function ContextMenu({
 
   if (!isOpen) return null
 
+  // Ensure menu stays within viewport
+  const menuStyle: React.CSSProperties = {
+    left: Math.min(position.x, typeof window !== 'undefined' ? window.innerWidth - 250 : position.x), // Keep within right edge
+    top: Math.min(position.y, typeof window !== 'undefined' ? window.innerHeight - 300 : position.y), // Keep within bottom edge
+    maxHeight: '80vh',
+    overflowY: 'auto'
+  }
+
   return (
     <div 
       ref={menuRef}
-      className="fixed z-50 bg-[#2c2c2c] border border-gray-600 rounded-lg shadow-lg py-1 min-w-[200px]"
-      style={{ 
-        left: position.x, 
-        top: position.y,
-        transform: 'translateY(-10px)' // Adjust positioning to avoid cursor
-      }}
+      className="fixed z-50 bg-[#2c2c2c] border border-gray-600 rounded-lg shadow-xl py-1 min-w-[200px] max-w-[250px]"
+      style={menuStyle}
     >
       {/* Header with session title */}
       <div className="px-3 py-2 border-b border-gray-600">

@@ -38,6 +38,9 @@ interface NewChatSession {
 
 export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) {
   const [selectedBot, setSelectedBot] = useState<Bot | null>(initialBots[0] || null)
+  
+  // Extract user's display name from email
+  const userName = user?.email ? user.email.split('@')[0] : 'User'
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>()
   const [availableBots, setAvailableBots] = useState<Bot[]>(initialBots)
   const [sidebarOpen, setSidebarOpen] = useState(false) // Default to closed on mobile, open on desktop
@@ -210,6 +213,7 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
             tenantId={tenant.id}
             userId={user.id}
             userEmail={user.email}
+            userName={userName}
             tenantName={tenant.name}
             tenantLogo={tenant.logo_url}
             currentSessionId={currentSessionId}

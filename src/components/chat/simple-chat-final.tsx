@@ -413,7 +413,7 @@ export function SimpleChat({
                 }}
                 placeholder={isProcessing ? "Waiting for response..." : "Ask anything"}
                 disabled={isProcessing || isSessionLoading}
-                className="w-full px-4 lg:px-6 py-3 lg:py-4 pr-14 lg:pr-16 text-[14px] lg:text-[16px] leading-relaxed bg-transparent border-0 rounded-2xl lg:rounded-3xl focus:ring-0 focus:outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none"
+                className="w-full px-4 lg:px-6 py-3 lg:py-4 pr-14 lg:pr-16 text-[16px] leading-relaxed bg-transparent border-0 rounded-2xl lg:rounded-3xl focus:ring-0 focus:outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 resize-none"
                 style={{ minHeight: '56px', maxHeight: '200px' }}
                 rows={1}
               />
