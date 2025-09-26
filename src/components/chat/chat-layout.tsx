@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, Suspense } from 'react'
 import { ChatSidebar } from './chat-sidebar'
 import { SimpleChat } from './simple-chat-final'
 import { TenantLogo } from '@/components/tenant-logo'
-import { ChevronDown, Bot, Settings, User, X, Menu } from 'lucide-react'
+import { ChevronDown, Bot, X, Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -27,6 +27,10 @@ interface Bot {
 interface ChatLayoutProps {
   tenant: any
   user: any
+  userProfile?: {
+    full_name?: string
+    avatar_url?: string
+  } | null
   initialBots?: Bot[]
 }
 
@@ -36,11 +40,11 @@ interface NewChatSession {
   botName?: string
 }
 
-export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) {
+export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: ChatLayoutProps) {
   const [selectedBot, setSelectedBot] = useState<Bot | null>(initialBots[0] || null)
   
-  // Extract user's display name from email
-  const userName = user?.email ? user.email.split('@')[0] : 'User'
+  // Use full name from profile, fallback to email prefix, then 'User'
+  const userName = userProfile?.full_name || (user?.email ? user.email.split('@')[0] : 'User')
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>()
   const [availableBots, setAvailableBots] = useState<Bot[]>(initialBots)
   const [sidebarOpen, setSidebarOpen] = useState(false) // Default to closed on mobile, open on desktop
@@ -383,37 +387,6 @@ export function ChatLayout({ tenant, user, initialBots = [] }: ChatLayoutProps) 
               )}
             </div>
 
-            {/* User Menu - Desktop only full menu, mobile simplified */}
-            {mounted ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10">
-                    <User className="h-4 w-4" />
-                    <span className="text-sm hidden sm:inline truncate max-w-[150px]">{user.email}</span>
-                    <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4 hidden sm:inline" />
-                  </Button>
-                </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel className="sm:hidden">
-                  <div className="text-xs truncate">{user.email}</div>
-                </DropdownMenuLabel>
-                <DropdownMenuLabel className="hidden sm:block">Account</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-red-600">
-                  Sign Out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <Button variant="ghost" size="sm" className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10" disabled>
-                <User className="h-4 w-4" />
-              </Button>
-            )}
           </div>
         </div>
 

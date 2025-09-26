@@ -12,6 +12,13 @@ export default async function DashboardPage() {
     redirect('/auth/login')
   }
 
+  // Get user profile data
+  const { data: userProfile, error: profileError } = await supabase
+    .from('user_profiles')
+    .select('full_name, avatar_url')
+    .eq('id', user.id)
+    .single()
+
   // Get user's tenant memberships
   const { data: memberships, error: membershipError } = await supabase
     .rpc('get_user_memberships', { user_uuid: user.id })
@@ -73,6 +80,7 @@ export default async function DashboardPage() {
       <ChatLayout 
         tenant={tenant as any}
         user={user}
+        userProfile={userProfile}
         initialBots={availableBots as any}
       />
     </TenantProvider>
