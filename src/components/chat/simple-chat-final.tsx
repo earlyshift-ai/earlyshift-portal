@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, Send, RefreshCw, Clock } from 'lucide-react'
+import { Loader2, Send, Clock } from 'lucide-react'
 import { useSessionId } from '@/hooks/use-session-id'
 import { createClient } from '@/lib/supabase/client'
 import ReactMarkdown from 'react-markdown'
@@ -49,8 +49,9 @@ export function SimpleChat({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<any>(null)
   
-  // Session management - prevent hook from running when we have an external session
-  const shouldUseHook = !externalSessionId && botId
+  // Session management - NEVER use the hook when we have an external session (even undefined)
+  // Only use the hook if botId is provided and NO external session prop exists
+  const shouldUseHook = false // Always false to prevent hook conflicts with parent management
   console.log('🔧 SimpleChat session logic:', { externalSessionId, botId, shouldUseHook })
   
   const { 
@@ -61,7 +62,8 @@ export function SimpleChat({
     clearSession 
   } = useSessionId(shouldUseHook ? botId : undefined, shouldUseHook ? tenantId : undefined)
   
-  const sessionId = externalSessionId || generatedSessionId
+  // Use external session ID directly, even if undefined (for new chat mode)
+  const sessionId = externalSessionId
 
   const supabase = createClient()
 
@@ -78,6 +80,7 @@ export function SimpleChat({
       setMessages([])
       setHasUserMessage(false)
       setIsProcessing(false)
+      setIsLoadingHistory(false) // Not loading when no session
       return
     }
 
@@ -237,7 +240,8 @@ export function SimpleChat({
     let activeSessionId = sessionId
     if (!activeSessionId && onNewChat) {
       console.log('🆕 No session exists, creating new session for first message')
-      activeSessionId = await onNewChat()
+      const newSessionId = await onNewChat()
+      activeSessionId = newSessionId ?? undefined
       if (!activeSessionId) {
         console.error('❌ Failed to create session')
         setIsProcessing(false)
@@ -298,29 +302,14 @@ export function SimpleChat({
     }
   }
 
-  const handleNewChat = async () => {
-    console.log('🆕 SimpleChat New Chat clicked - clearing local state only')
-    setHasUserMessage(false) // Reset for new chat
-    
-    // Always clear local state first
-    setMessages([])
-    setIsProcessing(false)
-    
-    // Clear session from localStorage to force fresh session creation on next message
-    clearSession()
-    
-    // Don't call parent's onNewChat which creates a session immediately
-    // Just clear state and let user send first message to create session
-    console.log('🧹 Chat cleared - ready for new conversation')
-  }
 
-  // Only show loading if we're actually loading a session
-  // Skip if we have an external session
-  if (!externalSessionId && (isSessionLoading || isLoadingHistory)) {
+  // Only show loading if we're actually loading history for an existing session
+  // Don't show loading for new chat mode (when sessionId is undefined)
+  if (sessionId && isLoadingHistory) {
     return (
       <div className="flex items-center justify-center h-full text-gray-500">
         <Loader2 className="h-6 w-6 animate-spin mr-2" />
-        {isSessionLoading ? 'Iniciando sesión...' : 'Cargando historial...'}
+        Cargando historial...
       </div>
     )
   }
@@ -346,17 +335,6 @@ export function SimpleChat({
             </span>
           )}
         </div>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={handleNewChat}
-          disabled={isProcessing}
-          className="h-8 lg:h-9 px-2 lg:px-3 text-xs lg:text-sm"
-        >
-          <RefreshCw className="h-3 w-3 lg:h-4 lg:w-4 mr-1 lg:mr-2" />
-          <span className="hidden sm:inline">Nuevo Chat</span>
-          <span className="sm:hidden">Nuevo</span>
-        </Button>
       </div>
 
       {/* Messages */}
