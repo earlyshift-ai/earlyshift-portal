@@ -74,6 +74,13 @@ export function SimpleChat({
 
   // Load messages and setup Realtime subscription
   useEffect(() => {
+    // Clean up previous subscription immediately when sessionId changes
+    if (channelRef.current) {
+      console.log('🔌 Cleaning up previous subscription')
+      channelRef.current.unsubscribe()
+      channelRef.current = null
+    }
+    
     if (!sessionId) {
       // Clear messages when no session
       console.log('🧹 No session ID - clearing messages and state')
@@ -87,9 +94,10 @@ export function SimpleChat({
     const setupChat = async () => {
       console.log('🔧 Setting up chat for session:', sessionId)
       
-      // Clear previous messages and reset state
+      // Clear ALL state for clean start
       setMessages([])
       setHasUserMessage(false)
+      setIsProcessing(false)
       
       // Load existing messages
       try {
@@ -124,16 +132,12 @@ export function SimpleChat({
         setIsLoadingHistory(false)
       }
 
-      // Clean up previous subscription if exists
-      if (channelRef.current) {
-        channelRef.current.unsubscribe()
-      }
-
-      // Set up Realtime subscription
+      // Set up Realtime subscription with unique channel name
       console.log('🔌 Setting up Realtime for session:', sessionId)
+      const channelName = `chat-${sessionId}-${Date.now()}` // Unique channel name
       
       channelRef.current = supabase
-        .channel(`simple-chat-${sessionId}`)
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
@@ -157,25 +161,40 @@ export function SimpleChat({
             
             // Add the new message
             setMessages(prev => {
-                // Check if message already exists or if it's a user message we already have
-                const exists = prev.some(m => 
-                  m.id === newMessage.id || 
-                  (m.role === 'user' && m.content === newMessage.content && m.id.startsWith('temp-'))
-                )
-                
-                if (!exists) {
-                  console.log('➕ Adding message:', newMessage.role, newMessage.id)
-                  return [...prev, newMessage]
-                } else if (exists && prev.some(m => m.id.startsWith('temp-') && m.content === newMessage.content)) {
-                  // Replace temporary message with real one from database
-                  console.log('🔄 Replacing temp message with real one')
-                  return prev.map(m => 
-                    m.id.startsWith('temp-') && m.content === newMessage.content 
-                      ? newMessage 
-                      : m
-                  )
+                // Skip system messages
+                if (payload.new.role === 'system') {
+                  return prev
                 }
-                return prev
+                
+                // Check if this is a duplicate of our temp message
+                if (newMessage.role === 'user') {
+                  const hasTempMessage = prev.some(m => 
+                    m.id.startsWith('temp-') && 
+                    m.content === newMessage.content &&
+                    m.role === 'user'
+                  )
+                  
+                  if (hasTempMessage) {
+                    // Replace the temp message with the real one
+                    console.log('🔄 Replacing temp user message with real one')
+                    return prev.map(m => 
+                      m.id.startsWith('temp-') && m.content === newMessage.content && m.role === 'user'
+                        ? { ...newMessage, id: newMessage.id } // Keep real ID
+                        : m
+                    )
+                  }
+                }
+                
+                // Check if message already exists by ID
+                const existsById = prev.some(m => m.id === newMessage.id)
+                if (existsById) {
+                  console.log('⏭️ Message already exists, skipping:', newMessage.id)
+                  return prev
+                }
+                
+                // Add new message
+                console.log('➕ Adding new message:', newMessage.role, newMessage.id)
+                return [...prev, newMessage]
               })
           }
         )
@@ -243,9 +262,18 @@ export function SimpleChat({
       const newSessionId = await onNewChat()
       activeSessionId = newSessionId ?? undefined
       if (!activeSessionId) {
-        console.error('❌ Failed to create session')
+        console.error('❌ Failed to create session after retries')
         setIsProcessing(false)
         setInputValue(messageText) // Restore input
+        
+        // Show error message to user
+        const errorMessage: Message = {
+          id: `error-${Date.now()}`,
+          content: 'Lo siento, hubo un problema al crear la sesión. Por favor, intenta nuevamente.',
+          role: 'assistant',
+          timestamp: new Date(),
+        }
+        setMessages([errorMessage])
         return
       }
     }

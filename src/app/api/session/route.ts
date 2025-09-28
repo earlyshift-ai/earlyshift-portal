@@ -48,6 +48,40 @@ export async function POST(req: NextRequest) {
       actualTenantId = memberships[0].tenant_id
     }
 
+    // Verify bot exists and user has access to it
+    const { data: bot, error: botError } = await supabase
+      .from('bots')
+      .select('id, name')
+      .eq('id', botId)
+      .single()
+
+    if (botError || !bot) {
+      console.error('❌ Bot not found:', {
+        error: botError,
+        bot_id: botId,
+      })
+      return NextResponse.json(
+        { error: 'Bot not found', details: botError?.message },
+        { status: 404 }
+      )
+    }
+
+    // Check if tenant has access to this bot
+    const { data: botAccess } = await supabase
+      .from('bot_access')
+      .select('id')
+      .eq('tenant_id', actualTenantId)
+      .eq('bot_id', botId)
+      .limit(1)
+
+    if (!botAccess || botAccess.length === 0) {
+      console.warn('⚠️ No bot_access record found, but proceeding anyway:', {
+        tenant_id: actualTenantId,
+        bot_id: botId,
+      })
+      // Don't fail here - some setups might not use bot_access table
+    }
+
     let sessionData: any
 
     if (externalId) {
@@ -77,44 +111,47 @@ export async function POST(req: NextRequest) {
 
       sessionData = data
     } else {
-      // Check for recent duplicate sessions first
-      const fiveMinutesAgo = new Date(Date.now() - 300000).toISOString()
-      const { data: recentSessions } = await supabase
+      // ALWAYS create a new session when requested - no reuse logic
+      // This ensures "New Chat" always creates a fresh conversation
+      console.log('📝 Creating new session (no reuse):', {
+        tenant_id: actualTenantId,
+        user_id: currentUserId,
+        bot_id: botId,
+      })
+      
+      const { data, error } = await supabase
         .from('chat_sessions')
-        .select('id, created_at')
-        .eq('tenant_id', actualTenantId)
-        .eq('user_id', currentUserId)
-        .eq('bot_id', botId)
-        .eq('status', 'active')
-        .gte('created_at', fiveMinutesAgo)
-        .order('created_at', { ascending: false })
-        .limit(1)
+        .insert({
+          tenant_id: actualTenantId,
+          user_id: currentUserId,
+          bot_id: botId,
+          status: 'active', // Explicitly set status
+          title: 'New Chat', // Set default title
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_message_at: new Date().toISOString(), // Add this field
+        })
+        .select('id')
+        .single()
 
-      if (recentSessions && recentSessions.length > 0) {
-        console.log('⚠️ Found recent session created less than 5 minutes ago, reusing:', recentSessions[0].id)
-        sessionData = recentSessions[0]
-      } else {
-        // Create new session
-        const { data, error } = await supabase
-          .from('chat_sessions')
-          .insert({
-            tenant_id: actualTenantId,
-            user_id: currentUserId,
-            bot_id: botId,
-          })
-          .select('id')
-          .single()
-
-        if (error) {
-          console.error('Session creation error:', error)
-          return NextResponse.json(
-            { error: 'Failed to create session', details: error.message },
-            { status: 500 }
-          )
-        }
-
-        sessionData = data
+      if (error) {
+        console.error('❌ Session creation error details:', {
+          error: error,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          tenant_id: actualTenantId,
+          user_id: currentUserId,
+          bot_id: botId,
+        })
+        return NextResponse.json(
+          { error: 'Failed to create session', details: error.message, code: error.code },
+          { status: 500 }
+        )
       }
+
+      sessionData = data
     }
 
     console.log('✅ Session created/updated:', sessionData.id)

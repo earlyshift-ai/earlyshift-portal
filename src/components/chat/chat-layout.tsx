@@ -132,13 +132,10 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   }
 
   const handleNewChat = async () => {
-    console.log('🆕 Parent handleNewChat called - creating session only when user sends first message')
+    console.log('🆕 Parent handleNewChat called - creating session for first message')
     
-    if (!selectedBot) return null
-    
-    // If already in new chat mode and no current session, just return null
-    if (isNewChatMode && !currentSessionId) {
-      console.log('📝 Already in new chat mode, waiting for first message')
+    if (!selectedBot) {
+      console.error('❌ No bot selected, cannot create session')
       return null
     }
     
@@ -150,59 +147,81 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
     }
     
     if (isCreatingSession) {
-      console.log('🚫 Already creating session, returning null')
-      return null
+      console.log('⏳ Already creating session, waiting...')
+      // Wait a bit and retry
+      await new Promise(resolve => setTimeout(resolve, 100))
+      return handleNewChat()
     }
     
-    // Create a new session
+    // Create a new session with retry logic
     const createSession = async () => {
-      try {
-        setIsCreatingSession(true)
-        
-        const response = await fetch('/api/session', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            botId: selectedBot.id,
-            tenantId: tenant.id,
-            userId: user.id,
-          }),
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          const newSessionId = data.sessionId
+      let retries = 3
+      
+      while (retries > 0) {
+        try {
+          setIsCreatingSession(true)
           
-          console.log('✅ New session created:', newSessionId)
-          
-          // Set the new session ID - this will be passed to SimpleChat
-          setCurrentSessionId(newSessionId)
-          setIsNewChatMode(false) // No longer in new chat mode
-          
-          // Clear ALL bot session keys from localStorage to ensure clean state
-          availableBots.forEach(bot => {
-            const sessionKey = `sessionId:${bot.id}`
-            localStorage.removeItem(sessionKey)
+          const response = await fetch('/api/session', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              botId: selectedBot.id,
+              tenantId: tenant.id,
+              userId: user.id,
+            }),
           })
           
-          return newSessionId
-        } else {
-          console.error('Failed to create session:', response.status)
-          return null
+          if (response.ok) {
+            const data = await response.json()
+            const newSessionId = data.sessionId
+            
+            console.log('✅ New session created:', newSessionId)
+            
+            // Set the new session ID - this will be passed to SimpleChat
+            setCurrentSessionId(newSessionId)
+            setIsNewChatMode(false) // No longer in new chat mode
+            
+            // Clear ALL bot session keys from localStorage to ensure clean state
+            availableBots.forEach(bot => {
+              const sessionKey = `sessionId:${bot.id}`
+              localStorage.removeItem(sessionKey)
+            })
+            
+            return newSessionId
+          } else {
+            console.error(`Failed to create session: ${response.status} - Retries left: ${retries - 1}`)
+            retries--
+            if (retries > 0) {
+              // Wait before retrying
+              await new Promise(resolve => setTimeout(resolve, 500))
+            }
+          }
+        } catch (error) {
+          console.error(`Failed to create new session: ${error} - Retries left: ${retries - 1}`)
+          retries--
+          if (retries > 0) {
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
         }
-      } catch (error) {
-        console.error('Failed to create new session:', error)
-        return null
-      } finally {
-        setIsCreatingSession(false)
-        sessionCreationRef.current = null
       }
+      
+      // All retries failed
+      console.error('❌ Failed to create session after 3 retries')
+      setIsCreatingSession(false)
+      sessionCreationRef.current = null
+      return null
     }
     
     sessionCreationRef.current = createSession()
     const result = await sessionCreationRef.current
+    
+    // Clean up after completion
+    setIsCreatingSession(false)
+    sessionCreationRef.current = null
+    
     return result || null
   }
 
@@ -439,7 +458,7 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
         <div className="flex-1 overflow-hidden min-h-0">
           {selectedBot ? (
             <SimpleChat
-              key={`chat-${selectedBot.id}-${currentSessionId || 'new'}`}
+              key={`chat-${selectedBot.id}-${currentSessionId || 'new'}-${isNewChatMode ? 'new-mode' : 'existing'}`}
               botName={selectedBot.name}
               botId={selectedBot.id}
               userId={user.id}
