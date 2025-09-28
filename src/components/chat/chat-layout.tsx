@@ -458,7 +458,7 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
         <div className="flex-1 overflow-hidden min-h-0">
           {selectedBot ? (
             <SimpleChat
-              key={`chat-${selectedBot.id}-${currentSessionId || 'new'}-${isNewChatMode ? 'new-mode' : 'existing'}`}
+              key={`chat-${selectedBot.id}`}
               botName={selectedBot.name}
               botId={selectedBot.id}
               userId={user.id}

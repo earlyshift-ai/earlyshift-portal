@@ -62,6 +62,7 @@ export function ChatSidebar({
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   
@@ -111,6 +112,11 @@ export function ChatSidebar({
   })
   
   const supabase = createClient()
+
+  // Set mounted state
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     loadSessions()
@@ -626,34 +632,44 @@ export function ChatSidebar({
 
       {/* User Profile */}
       <div className="flex-shrink-0 border-t border-gray-800 p-3">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 rounded-lg transition-colors group">
-              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
-                {userName ? userName.charAt(0).toUpperCase() : userEmail ? userEmail.charAt(0).toUpperCase() : 'U'}
-              </div>
-              <span className="text-[14px] truncate flex-1 text-left">{userName || userEmail || 'User'}</span>
-              <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent 
-            align="start" 
-            side="top" 
-            className="w-[280px] bg-[#212121] border-gray-700 text-white mb-2"
-          >
-            <DropdownMenuItem 
-              onClick={async () => {
-                const supabase = createClient()
-                await supabase.auth.signOut()
-                router.push('/auth/login')
-              }}
-              className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer text-red-400 focus:text-red-400"
+        {mounted ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 rounded-lg transition-colors group">
+                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
+                  {userName ? userName.charAt(0).toUpperCase() : userEmail ? userEmail.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <span className="text-[14px] truncate flex-1 text-left">{userName || userEmail || 'User'}</span>
+                <ChevronDown className="h-4 w-4 text-gray-400 transition-transform group-data-[state=open]:rotate-180" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent 
+              align="start" 
+              side="top" 
+              className="w-[280px] bg-[#212121] border-gray-700 text-white mb-2"
             >
-              <LogOut className="h-4 w-4 mr-2" />
-              Log Out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <DropdownMenuItem 
+                onClick={async () => {
+                  const supabase = createClient()
+                  await supabase.auth.signOut()
+                  router.push('/auth/login')
+                }}
+                className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer text-red-400 focus:text-red-400"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Log Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-800 rounded-lg transition-colors group">
+            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
+              {userName ? userName.charAt(0).toUpperCase() : userEmail ? userEmail.charAt(0).toUpperCase() : 'U'}
+            </div>
+            <span className="text-[14px] truncate flex-1 text-left">{userName || userEmail || 'User'}</span>
+            <ChevronDown className="h-4 w-4 text-gray-400" />
+          </button>
+        )}
       </div>
 
       {/* Context Menu */}

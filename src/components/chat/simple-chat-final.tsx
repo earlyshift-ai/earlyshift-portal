@@ -45,9 +45,11 @@ export function SimpleChat({
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [isProcessing, setIsProcessing] = useState(false)
   const [hasUserMessage, setHasUserMessage] = useState(false)
+  const [pendingAssistantMessageId, setPendingAssistantMessageId] = useState<string | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const channelRef = useRef<any>(null)
+  const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
   // Session management - NEVER use the hook when we have an external session (even undefined)
   // Only use the hook if botId is provided and NO external session prop exists
@@ -72,8 +74,14 @@ export function SimpleChat({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Track previous sessionId to detect changes
+  const prevSessionIdRef = useRef<string | undefined>(sessionId)
+  
   // Load messages and setup Realtime subscription
   useEffect(() => {
+    const prevSessionId = prevSessionIdRef.current
+    prevSessionIdRef.current = sessionId
+    
     // Clean up previous subscription immediately when sessionId changes
     if (channelRef.current) {
       console.log('🔌 Cleaning up previous subscription')
@@ -82,11 +90,14 @@ export function SimpleChat({
     }
     
     if (!sessionId) {
-      // Clear messages when no session
-      console.log('🧹 No session ID - clearing messages and state')
-      setMessages([])
-      setHasUserMessage(false)
-      setIsProcessing(false)
+      // Only clear messages if we're moving FROM a session to no session
+      // Not when we start with no session (new chat mode)
+      if (prevSessionId) {
+        console.log('🧹 Moving to no session - clearing messages and state')
+        setMessages([])
+        setHasUserMessage(false)
+        setIsProcessing(false)
+      }
       setIsLoadingHistory(false) // Not loading when no session
       return
     }
@@ -94,44 +105,61 @@ export function SimpleChat({
     const setupChat = async () => {
       console.log('🔧 Setting up chat for session:', sessionId)
       
-      // Clear ALL state for clean start
-      setMessages([])
-      setHasUserMessage(false)
-      setIsProcessing(false)
+      // Only clear messages if we're switching between different existing sessions
+      // Don't clear when going from undefined -> sessionId (new session creation)
+      const isNewSessionCreation = !prevSessionId && sessionId
       
-      // Load existing messages
-      try {
-        setIsLoadingHistory(true)
-        
-        const { data, error } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('session_id', sessionId)
-          .order('created_at', { ascending: true })
+      if (!isNewSessionCreation) {
+        // Clear state only when switching between sessions
+        setMessages([])
+        setHasUserMessage(false)
+        setIsProcessing(false)
+      }
+      // For new session creation, preserve the temporary user message
+      
+      // Load existing messages only if not a new session creation
+      if (!isNewSessionCreation) {
+        try {
+          setIsLoadingHistory(true)
+          
+          const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('session_id', sessionId)
+            .order('created_at', { ascending: true })
 
-        if (error) throw error
+          if (error) throw error
 
-        const formattedMessages: Message[] = data
-          .filter((msg: any) => msg.role !== 'system') // Filter out system messages
-          .map((msg: any) => ({
-            id: msg.id,
-            content: msg.content || '',
-            role: msg.role as 'user' | 'assistant',
-            timestamp: new Date(msg.created_at),
-            latency: msg.latency_ms,
-            botName: msg.metadata?.bot_name || (msg.role === 'assistant' ? botName : undefined),
-            botId: msg.metadata?.bot_id || (msg.role === 'assistant' ? botId : undefined),
-          }))
+          const formattedMessages: Message[] = data
+            .filter((msg: any) => msg.role !== 'system') // Filter out system messages
+            .map((msg: any) => ({
+              id: msg.id,
+              content: msg.content || '',
+              role: msg.role as 'user' | 'assistant',
+              timestamp: new Date(msg.created_at),
+              latency: msg.latency_ms,
+              botName: msg.metadata?.bot_name || (msg.role === 'assistant' ? botName : undefined),
+              botId: msg.metadata?.bot_id || (msg.role === 'assistant' ? botId : undefined),
+            }))
 
-        setMessages(formattedMessages)
-        // Check if there are user messages
-        setHasUserMessage(formattedMessages.some(m => m.role === 'user'))
-      } catch (error) {
-        console.error('Failed to load messages:', error)
-      } finally {
+          setMessages(formattedMessages)
+          // Check if there are user messages
+          setHasUserMessage(formattedMessages.some(m => m.role === 'user'))
+        } catch (error) {
+          console.error('Failed to load messages:', error)
+        } finally {
+          setIsLoadingHistory(false)
+        }
+      } else {
+        // For new session, just mark as not loading
         setIsLoadingHistory(false)
+        setHasUserMessage(true) // We have a user message from the form submission
       }
 
+      // Add a small delay before setting up Realtime to ensure session is fully created in database
+      // This helps prevent missing the initial assistant placeholder message
+      await new Promise(resolve => setTimeout(resolve, 200))
+      
       // Set up Realtime subscription with unique channel name
       console.log('🔌 Setting up Realtime for session:', sessionId)
       const channelName = `chat-${sessionId}-${Date.now()}` // Unique channel name
@@ -168,20 +196,33 @@ export function SimpleChat({
                 
                 // Check if this is a duplicate of our temp message
                 if (newMessage.role === 'user') {
-                  const hasTempMessage = prev.some(m => 
+                  // Check for temp message with similar content (normalize comparison)
+                  const tempMessage = prev.find(m => 
                     m.id.startsWith('temp-') && 
-                    m.content === newMessage.content &&
-                    m.role === 'user'
+                    m.role === 'user' &&
+                    m.content.trim().toLowerCase() === newMessage.content.trim().toLowerCase()
                   )
                   
-                  if (hasTempMessage) {
+                  if (tempMessage) {
                     // Replace the temp message with the real one
                     console.log('🔄 Replacing temp user message with real one')
                     return prev.map(m => 
-                      m.id.startsWith('temp-') && m.content === newMessage.content && m.role === 'user'
-                        ? { ...newMessage, id: newMessage.id } // Keep real ID
+                      m.id === tempMessage.id
+                        ? { ...newMessage } // Replace with real message
                         : m
                     )
+                  }
+                  
+                  // Also check if it's a duplicate by content (within last 5 seconds)
+                  const recentDuplicate = prev.find(m => 
+                    m.role === 'user' &&
+                    m.content.trim().toLowerCase() === newMessage.content.trim().toLowerCase() &&
+                    (new Date().getTime() - m.timestamp.getTime()) < 5000
+                  )
+                  
+                  if (recentDuplicate) {
+                    console.log('⏭️ Duplicate user message, skipping:', newMessage.id)
+                    return prev
                   }
                 }
                 
@@ -223,10 +264,20 @@ export function SimpleChat({
               })
             )
             
-            // If it's an assistant message being completed, we're done processing
-            if (payload.new.role === 'assistant' && payload.new.status === 'completed') {
-              console.log('✅ Assistant response completed')
-              setIsProcessing(false)
+            // If it's an assistant message being completed or has actual content, we're done processing
+            if (payload.new.role === 'assistant') {
+              // Clear processing state if message is completed or has real content (not placeholder)
+              if (payload.new.status === 'completed' || 
+                  (payload.new.content && !payload.new.content.includes('Procesando tu consulta'))) {
+                console.log('✅ Assistant response received/completed')
+                setIsProcessing(false)
+                setPendingAssistantMessageId(null)
+                // Clear the timeout since we got a response
+                if (processingTimeoutRef.current) {
+                  clearTimeout(processingTimeoutRef.current)
+                  processingTimeoutRef.current = null
+                }
+              }
             }
           }
         )
@@ -243,6 +294,9 @@ export function SimpleChat({
         console.log('🔌 Cleaning up Realtime')
         channelRef.current.unsubscribe()
       }
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current)
+      }
     }
   }, [sessionId, supabase])
 
@@ -255,6 +309,16 @@ export function SimpleChat({
     setInputValue('')
     setIsProcessing(true)
     
+    // Add user message immediately (optimistic update) - BEFORE session creation
+    const tempUserId = `temp-${Date.now()}`
+    const userMessage: Message = {
+      id: tempUserId,
+      content: messageText,
+      role: 'user',
+      timestamp: new Date(),
+    }
+    setMessages(prev => [...prev, userMessage])
+    
     // If no session exists, create one first
     let activeSessionId = sessionId
     if (!activeSessionId && onNewChat) {
@@ -266,22 +330,23 @@ export function SimpleChat({
         setIsProcessing(false)
         setInputValue(messageText) // Restore input
         
-        // Show error message to user
-        const errorMessage: Message = {
+        // Replace user message with error
+        setMessages([{
           id: `error-${Date.now()}`,
           content: 'Lo siento, hubo un problema al crear la sesión. Por favor, intenta nuevamente.',
           role: 'assistant',
           timestamp: new Date(),
-        }
-        setMessages([errorMessage])
+        }])
         return
       }
+      // IMPORTANT: Don't clear messages here - keep the user message visible
     }
     
     if (!activeSessionId) {
       console.error('❌ No session ID available')
       setIsProcessing(false)
       setInputValue(messageText) // Restore input
+      setMessages([]) // Clear the temp message
       return
     }
     
@@ -291,15 +356,6 @@ export function SimpleChat({
       onFirstMessage(activeSessionId, messageText)
       setHasUserMessage(true)
     }
-    
-    // Add user message immediately (optimistic update)
-    const userMessage: Message = {
-      id: `temp-${Date.now()}`,
-      content: messageText,
-      role: 'user',
-      timestamp: new Date(),
-    }
-    setMessages(prev => [...prev, userMessage])
     
     try {
       // Send to backend first - it will handle inserting the user message
@@ -324,9 +380,81 @@ export function SimpleChat({
       // The response will come through Realtime
       console.log('📤 Message sent, waiting for response via Realtime')
       
+      // Parse response to get assistant message ID if available
+      const responseData = await response.json()
+      if (responseData.assistantMessageId) {
+        setPendingAssistantMessageId(responseData.assistantMessageId)
+      }
+      
+      // Set up a fallback polling mechanism to check for missed messages
+      // This helps if Realtime subscription misses the initial message
+      let pollCount = 0
+      const maxPolls = 10
+      const pollIntervalRef = { current: null as NodeJS.Timeout | null }
+      
+      pollIntervalRef.current = setInterval(async () => {
+        pollCount++
+        
+        // Stop polling after max attempts
+        if (pollCount >= maxPolls) {
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+          return
+        }
+        
+        // Try to fetch the assistant message directly
+        if (responseData.assistantMessageId) {
+          const { data: assistantMsg } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('id', responseData.assistantMessageId)
+            .single()
+            
+          if (assistantMsg && assistantMsg.content && !assistantMsg.content.includes('Procesando tu consulta')) {
+            console.log('📨 Found assistant message via polling')
+            // Add message if not already present
+            setMessages(prev => {
+              const exists = prev.some(m => m.id === assistantMsg.id)
+              if (!exists) {
+                const newMessage = {
+                  id: assistantMsg.id,
+                  content: assistantMsg.content,
+                  role: 'assistant' as const,
+                  timestamp: new Date(assistantMsg.created_at),
+                  latency: assistantMsg.latency_ms,
+                  botName: assistantMsg.metadata?.bot_name || botName,
+                  botId: assistantMsg.metadata?.bot_id || botId,
+                }
+                return [...prev, newMessage]
+              }
+              return prev
+            })
+            setIsProcessing(false)
+            setPendingAssistantMessageId(null)
+            if (processingTimeoutRef.current) {
+              clearTimeout(processingTimeoutRef.current)
+              processingTimeoutRef.current = null
+            }
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+          }
+        }
+      }, 2000) // Poll every 2 seconds
+      
+      // Set up a fallback timeout to clear processing state if we don't get a response
+      // This prevents the UI from getting stuck if Realtime fails
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current)
+      }
+      processingTimeoutRef.current = setTimeout(() => {
+        console.log('⏱️ Response timeout - clearing processing state')
+        setIsProcessing(false)
+        setPendingAssistantMessageId(null)
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current) // Also clear polling
+      }, 30000) // 30 seconds timeout
+      
     } catch (error) {
       console.error('❌ Failed to send message:', error)
       setIsProcessing(false)
+      setPendingAssistantMessageId(null)
     }
   }
 
