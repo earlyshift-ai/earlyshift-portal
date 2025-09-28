@@ -78,9 +78,26 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   useEffect(() => {
     const checkSessionMessages = async () => {
       if (!currentSessionId) {
-        console.log('🔓 No currentSessionId - unlocking bot selector')
-        setSessionHasMessages(false)
+        // Only unlock if we're not creating a session
+        if (!isCreatingSession) {
+          console.log('🔓 No currentSessionId - unlocking bot selector')
+          setSessionHasMessages(false)
+        }
         return
+      }
+      
+      // Skip check if we're actively creating a session or just created one
+      // The handleNewChat function already sets sessionHasMessages to true
+      if (isCreatingSession || sessionCreationRef.current) {
+        console.log('⏭️ Skipping message check - session being created')
+        return
+      }
+      
+      // Add a small delay for newly created sessions to allow messages to be inserted
+      // This helps prevent the race condition where we check before the message is in the DB
+      if (newLocalSession?.id === currentSessionId) {
+        console.log('⏱️ New session detected, delaying message check')
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
       
       try {
@@ -94,17 +111,25 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
           console.log('🔒 Session has messages - locking bot selector')
           setSessionHasMessages(true)
         } else {
-          console.log('🔓 Session has no messages - unlocking bot selector')
-          setSessionHasMessages(false)
+          // Only unlock if this is not a new session we just created
+          if (newLocalSession?.id !== currentSessionId) {
+            console.log('🔓 Session has no messages - unlocking bot selector')
+            setSessionHasMessages(false)
+          } else {
+            console.log('🔒 Keeping bot locked for new session')
+          }
         }
       } catch (error) {
         console.error('Error checking session messages:', error)
-        setSessionHasMessages(false)
+        // Don't unlock on error if it's a new session
+        if (newLocalSession?.id !== currentSessionId) {
+          setSessionHasMessages(false)
+        }
       }
     }
     
     checkSessionMessages()
-  }, [currentSessionId, supabase])
+  }, [currentSessionId, supabase, isCreatingSession, newLocalSession])
   
   const loadBots = async () => {
     try {
@@ -138,6 +163,10 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
       console.error('❌ No bot selected, cannot create session')
       return null
     }
+    
+    // Immediately lock the bot selector when creating a session with a message
+    // This is called from SimpleChat when a message is being sent
+    setSessionHasMessages(true)
     
     // Prevent concurrent session creation
     if (sessionCreationRef.current) {
@@ -212,6 +241,8 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
       console.error('❌ Failed to create session after 3 retries')
       setIsCreatingSession(false)
       sessionCreationRef.current = null
+      // Unlock bot selector on failure
+      setSessionHasMessages(false)
       return null
     }
     
@@ -221,6 +252,11 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
     // Clean up after completion
     setIsCreatingSession(false)
     sessionCreationRef.current = null
+    
+    // If session creation failed, unlock the bot selector
+    if (!result) {
+      setSessionHasMessages(false)
+    }
     
     return result || null
   }
@@ -275,6 +311,12 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
   const handleFirstMessage = (sessionId: string, messageText: string) => {
     // When first message is sent, update local state immediately
     console.log('📝 First message sent, updating sidebar:', sessionId, messageText)
+    
+    // Update the current session to match
+    if (sessionId !== currentSessionId) {
+      setCurrentSessionId(sessionId)
+    }
+    
     setNewLocalSession({
       id: sessionId,
       title: messageText.slice(0, 100),
@@ -282,6 +324,7 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
     })
     
     // Lock the bot selector immediately when a message is sent
+    // This is the authoritative lock that should persist
     setSessionHasMessages(true)
     setIsNewChatMode(false) // No longer in new chat mode after first message
   }
@@ -391,20 +434,20 @@ export function ChatLayout({ tenant, user, userProfile, initialBots = [] }: Chat
                     <Button 
                       variant="ghost" 
                       className="gap-1 lg:gap-2 px-2 lg:px-3 h-8 lg:h-10"
-                      disabled={sessionHasMessages}
+                      disabled={sessionHasMessages || isCreatingSession}
                     >
                       <Bot className="h-4 w-4" />
                       <span className="font-medium text-sm lg:text-base truncate max-w-[120px] lg:max-w-none">
                         {selectedBot?.name || 'Select a bot'}
                       </span>
-                      {sessionHasMessages ? (
+                      {(sessionHasMessages || isCreatingSession) ? (
                         <div className="text-xs text-gray-500 ml-1" title="Bot locked for this conversation">🔒</div>
                       ) : (
                         <ChevronDown className="h-3 w-3 lg:h-4 lg:w-4" />
                       )}
                     </Button>
                   </DropdownMenuTrigger>
-                  {!sessionHasMessages && (
+                  {!sessionHasMessages && !isCreatingSession && (
                 <DropdownMenuContent align="start" className="w-64">
                   <DropdownMenuLabel>Available Bots</DropdownMenuLabel>
                   <DropdownMenuSeparator />
